@@ -387,7 +387,7 @@ async def cmd_beli(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     parse_mode="Markdown"
                 )
 
-            current_tier_num = int(current_gelar.replace("G", "")) if current_gelar.startswith("G") else 0
+            current_tier_num = int(current_gelar.replace("G", "")) if current_gelar and current_gelar.startswith("G") else 0
             target_tier_num = int(code.replace("G", ""))
 
             if target_tier_num <= current_tier_num:
@@ -494,7 +494,7 @@ async def cmd_bank(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         elif action == "payloan":
             pay_amount = bank_loan if amount == 0 else min(amount, bank_loan)
-            if koin < pay_amount or bank_loan <= 0:
+            if pay_amount <= 0 or koin < pay_amount or bank_loan <= 0:
                 return await update.message.reply_text("❌ Pembayaran pinjaman gagal!")
             await db.execute("UPDATE users SET koin = koin - ?, bank_loan = bank_loan - ? WHERE user_id = ?", (pay_amount, pay_amount, user_id))
             await db.commit()
@@ -508,7 +508,7 @@ async def cmd_business(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     async with get_db_connection() as db:
         user = await get_or_create_user(db, user_id, username)
-        last_collect = user[17] if len(user) > 17 else 0
+        last_collect = user[17] if len(user) > 17 and user[17] is not None else 0
 
         async with db.execute("SELECT item_code FROM inventory WHERE user_id = ? AND item_type IN ('business', 'property', 'vehicle')", (user_id,)) as cursor:
             assets = await cursor.fetchall()
@@ -711,7 +711,7 @@ async def cmd_override_balance(update: Update, context: ContextTypes.DEFAULT_TYP
         if tier < 2:
             return await update.message.reply_text("🚫 Perintah ini membutuhkan akses **Admin Tier 2**.")
 
-        if len(context.args) < 3:
+        if len(context.args) < 3 or not context.args[0].isdigit() or not context.args[1].isdigit():
             return await update.message.reply_text("❌ Format: `/override_balance [target_user_id] [jumlah_koin] [alasan]`")
 
         target_id = int(context.args[0])
@@ -765,7 +765,7 @@ async def cmd_set_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if tier < 4:
             return await update.message.reply_text("🚫 Hanya **Owner (Tier 4)** yang dapat mengubah wewenang Admin.")
 
-        if len(context.args) < 2:
+        if len(context.args) < 2 or not context.args[0].isdigit() or not context.args[1].isdigit():
             return await update.message.reply_text("❌ Format: `/set_admin [target_user_id] [tier_0-4]`")
 
         target_id = int(context.args[0])
