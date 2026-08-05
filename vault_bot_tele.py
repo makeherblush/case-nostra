@@ -16,25 +16,23 @@ from telegram.ext import (
 # CONFIGURATION
 # ==========================================
 
-# Ambil HANYA dari Variables Railway
 TOKEN = os.getenv("TELEGRAM_VAULT_BOT_TOKEN")
 
 if not TOKEN:
     raise ValueError("TELEGRAM_VAULT_BOT_TOKEN belum diset di Variables Railway!")
 
-# Path Absolut agar kedua bot membaca file fisik database yang sama persis
+# Path Absolut agar membaca file fisik database yang sama persis
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_NAME = os.path.join(BASE_DIR, "cosa_nostra.db")
 WIB = timezone(timedelta(hours=7))
 
 # ==========================================
-# HELPER KONEKSI DATABASE (WAL MODE ENABLER)
+# HELPER KONEKSI DATABASE (WAL MODE & AUTO TABLE CREATION)
 # ==========================================
 @asynccontextmanager
 async def get_db_connection():
     """
-    Membuka koneksi SQLite dengan konfigurasi WAL (Write-Ahead Logging)
-    menggunakan async generator agar aman digunakan dengan `async with get_db_connection() as db:`.
+    Membuka koneksi SQLite dengan konfigurasi WAL mode.
     """
     db = await aiosqlite.connect(DB_NAME, timeout=30.0)
     try:
@@ -44,13 +42,79 @@ async def get_db_connection():
     finally:
         await db.close()
 
+async def init_db():
+    """Membuat semua tabel yang dibutuhkan jika belum ada."""
+    async with get_db_connection() as db:
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                user_id INTEGER PRIMARY KEY,
+                username TEXT,
+                koin INTEGER DEFAULT 10000,
+                bank_balance INTEGER DEFAULT 0,
+                bank_loan INTEGER DEFAULT 0,
+                vitality INTEGER DEFAULT 100,
+                gelar_tier TEXT DEFAULT 'G0',
+                heat INTEGER DEFAULT 0,
+                respect INTEGER DEFAULT 0,
+                admin_tier INTEGER DEFAULT 0,
+                jailed_until INTEGER DEFAULT 0,
+                bounty INTEGER DEFAULT 0,
+                crew_id INTEGER DEFAULT 0,
+                last_work INTEGER DEFAULT 0,
+                last_daily INTEGER DEFAULT 0,
+                job_active TEXT,
+                job_finish_time INTEGER DEFAULT 0,
+                last_business_collect INTEGER DEFAULT 0
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS inventory (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                item_code TEXT,
+                item_type TEXT,
+                durability INTEGER DEFAULT 100,
+                cert_number TEXT UNIQUE,
+                is_equipped INTEGER DEFAULT 0,
+                acquired_at INTEGER
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS certificates (
+                cert_number TEXT PRIMARY KEY,
+                user_id INTEGER,
+                asset_code TEXT,
+                asset_name TEXT,
+                purchase_price INTEGER,
+                issue_date TEXT,
+                sha256_hash TEXT
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS admin_logs (
+                log_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                admin_id INTEGER,
+                action TEXT,
+                target_id INTEGER,
+                details TEXT,
+                timestamp INTEGER
+            )
+        """)
+        await db.commit()
+
+async def post_init(application):
+    await init_db()
+
 # ==========================================
 # DATABASE HELPER & USER MANAGEMENT
 # ==========================================
 USER_COLUMNS = "user_id, username, koin, bank_balance, bank_loan, vitality, gelar_tier, heat, respect, admin_tier, jailed_until, bounty, crew_id, last_work, last_daily, job_active, job_finish_time, last_business_collect"
 
 async def get_or_create_user(db, user_id: int, username: str):
-    """Fungsi standar untuk mengambil atau membuat data user secara konsisten berdasarkan user_id."""
+    """Fungsi standar untuk mengambil/membuat data user & memastikan struktur DB siap."""
+    # Safety Check: Pastikan tabel terbuat jika belum
+    await init_db()
+
     async with db.execute(f"SELECT {USER_COLUMNS} FROM users WHERE user_id = ?", (user_id,)) as cursor:
         user = await cursor.fetchone()
         
@@ -208,71 +272,6 @@ CATALOG = {
     "B13": {"name": "Syndicate Kartel Global", "type": "business", "price": 1000000, "passive": 20000, "desc": "Konsorsium kriminal dunia"}
 }
 
-# ==========================================
-# DATABASE INITIALIZATION
-# ==========================================
-async def init_db():
-    async with get_db_connection() as db:
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                user_id INTEGER PRIMARY KEY,
-                username TEXT,
-                koin INTEGER DEFAULT 10000,
-                bank_balance INTEGER DEFAULT 0,
-                bank_loan INTEGER DEFAULT 0,
-                vitality INTEGER DEFAULT 100,
-                gelar_tier TEXT DEFAULT 'G0',
-                heat INTEGER DEFAULT 0,
-                respect INTEGER DEFAULT 0,
-                admin_tier INTEGER DEFAULT 0,
-                jailed_until INTEGER DEFAULT 0,
-                bounty INTEGER DEFAULT 0,
-                crew_id INTEGER DEFAULT 0,
-                last_work INTEGER DEFAULT 0,
-                last_daily INTEGER DEFAULT 0,
-                job_active TEXT,
-                job_finish_time INTEGER DEFAULT 0,
-                last_business_collect INTEGER DEFAULT 0
-            )
-        """)
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS inventory (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
-                item_code TEXT,
-                item_type TEXT,
-                durability INTEGER DEFAULT 100,
-                cert_number TEXT UNIQUE,
-                is_equipped INTEGER DEFAULT 0,
-                acquired_at INTEGER
-            )
-        """)
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS certificates (
-                cert_number TEXT PRIMARY KEY,
-                user_id INTEGER,
-                asset_code TEXT,
-                asset_name TEXT,
-                purchase_price INTEGER,
-                issue_date TEXT,
-                sha256_hash TEXT
-            )
-        """)
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS admin_logs (
-                log_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                admin_id INTEGER,
-                action TEXT,
-                target_id INTEGER,
-                details TEXT,
-                timestamp INTEGER
-            )
-        """)
-        await db.commit()
-
-async def post_init(application):
-    await init_db()
-
 def generate_certificate(user_id: int, asset_code: str, asset_name: str, price: int) -> tuple:
     now = datetime.now(WIB)
     epoch = int(now.timestamp())
@@ -403,7 +402,6 @@ async def cmd_beli(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         new_koin = user_koin - price
 
-        # Jika item bertipe makanan/minuman, langsung memulihkan vitality
         if item["type"] in ["food", "drink"]:
             vit_gain = item.get("vit", 0)
             new_vit = min(100, user_vitality + vit_gain)
@@ -539,7 +537,6 @@ async def cmd_business(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return await update.message.reply_text(f"💵 *HASIL BISNIS:* Anda mendapatkan *+{total_daily_passive:,} Koin*.", parse_mode="Markdown")
 
 async def cmd_portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Menampilkan Portofolio Kekayaan & Aset milik user secara detail."""
     user_id = update.effective_user.id
     current_username = update.effective_user.username or update.effective_user.first_name or "TanpaUsername"
 
@@ -577,11 +574,7 @@ async def cmd_portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 item_info = CATALOG.get(code, {})
                 name = item_info.get("name", code)
                 
-                if acquired_at:
-                    date_str = datetime.fromtimestamp(acquired_at, tz=WIB).strftime("%Y-%m-%d")
-                else:
-                    date_str = "N/A"
-
+                date_str = datetime.fromtimestamp(acquired_at, tz=WIB).strftime("%Y-%m-%d") if acquired_at else "N/A"
                 text += f"• *[{code}] {name}*\n  └ Cert: `{cert}` | _{date_str}_\n"
 
         await update.message.reply_text(text, parse_mode="Markdown")
@@ -783,9 +776,6 @@ async def cmd_set_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # MAIN FUNCTION
 # ==========================================
 def build_app():
-    """Membangun Application (handlers terpasang) tanpa langsung menjalankan polling.
-    Dipisah dari main() supaya bot ini bisa dijalankan sendiri (standalone)
-    ATAU digabung dengan bot lain dalam satu proses lewat bot_launcher.py."""
     app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
 
     # Public Commands
@@ -811,6 +801,9 @@ def build_app():
     return app
 
 def main():
+    import asyncio
+    # Inisialisasi DB secara eksplisit sebelum polling dimulai
+    asyncio.run(init_db())
     app = build_app()
     print("💰 Telegram Cosa Nostra Vault Bot Running...")
     app.run_polling()
