@@ -85,6 +85,31 @@ async def sync_gelar_from_assets(db, user_id: int) -> str:
 
 async def get_or_create_user(db, user_id: int, username: str):
     """Fungsi standar untuk mengambil atau membuat data user secara konsisten berdasarkan user_id."""
+    # Pastikan tabel users terbuat sebelum query dilakukan
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY,
+            username TEXT,
+            koin INTEGER DEFAULT 10000,
+            bank_balance INTEGER DEFAULT 0,
+            bank_loan INTEGER DEFAULT 0,
+            vitality INTEGER DEFAULT 100,
+            gelar_tier TEXT DEFAULT 'G0',
+            heat INTEGER DEFAULT 0,
+            respect INTEGER DEFAULT 0,
+            admin_tier INTEGER DEFAULT 0,
+            jailed_until INTEGER DEFAULT 0,
+            bounty INTEGER DEFAULT 0,
+            crew_id INTEGER DEFAULT 0,
+            last_work INTEGER DEFAULT 0,
+            last_daily INTEGER DEFAULT 0,
+            job_active TEXT,
+            job_finish_time INTEGER DEFAULT 0,
+            last_business_collect INTEGER DEFAULT 0
+        )
+    """)
+    await db.commit()
+
     async with db.execute(f"SELECT {USER_COLUMNS} FROM users WHERE user_id = ?", (user_id,)) as cursor:
         user = await cursor.fetchone()
         
