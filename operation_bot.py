@@ -14,7 +14,7 @@ from telegram.ext import (
 # ==========================================
 # CONFIGURATION
 # ==========================================
-RAW_TOKEN = os.getenv("TELEGRAM_OPERATIONS_BOT_TOKEN", "8962770070:AAF9qjMO0aNRScTIamjWoUeKGtg7eIPYRsY")
+RAW_TOKEN = os.getenv("TELEGRAM_OPERATIONS_BOT_TOKEN", "8962770070:AAFehIMNmW9FyWSC3SPxiqFI6yjCXltpclc")
 TOKEN = RAW_TOKEN.strip()
 
 # Path Absolut agar kedua bot membaca file fisik database yang sama persis
