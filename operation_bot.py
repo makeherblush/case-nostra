@@ -14,7 +14,6 @@ from telegram.ext import (
 # ==========================================
 # CONFIGURATION
 # ==========================================
-import os
 
 # Ambil HANYA dari Variables Railway
 TOKEN = os.getenv("TELEGRAM_OPERATIONS_BOT_TOKEN")
