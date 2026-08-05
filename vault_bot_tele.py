@@ -15,8 +15,12 @@ from telegram.ext import (
 # ==========================================
 # CONFIGURATION
 # ==========================================
-RAW_TOKEN = os.getenv("TELEGRAM_VAULT_BOT_TOKEN")
-TOKEN = RAW_TOKEN.strip()
+
+# Ambil HANYA dari Variables Railway
+TOKEN = os.getenv("TELEGRAM_VAULT_BOT_TOKEN")
+
+if not TOKEN:
+    raise ValueError("TELEGRAM_VAULT_BOT_TOKEN belum diset di Variables Railway!")
 
 # Path Absolut agar kedua bot membaca file fisik database yang sama persis
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
