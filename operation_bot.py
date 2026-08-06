@@ -27,7 +27,6 @@ logger = logging.getLogger("operation_bot")
 # CONFIGURATION
 # ==========================================
 
-# Ambil HANYA dari Variables Railway
 TOKEN = os.getenv("TELEGRAM_OPERATIONS_BOT_TOKEN")
 
 if not TOKEN:
@@ -91,7 +90,7 @@ async def sync_gelar_from_assets(db, user_id: int) -> str:
                     await db.commit()
                     return new_gelar
     except Exception:
-        pass # Jika tabel assets belum ada, fallback ke gelar_tier yang tersimpan
+        pass 
     
     async with db.execute("SELECT gelar_tier FROM users WHERE user_id = ?", (user_id,)) as cursor:
         res = await cursor.fetchone()
@@ -147,41 +146,42 @@ async def get_or_create_user(db, user_id: int, username: str):
             return await cursor.fetchone()
 
 # ==========================================
-# MATRIX JOB & CRIME DATASTRUCTURE
+# MATRIX JOB (MAFIA & POLICE INTRIQUE)
 # ==========================================
 JOBS = {
-    # TIER 1: Made Man (G1)
-    "debt": {"name": "Debt Collector", "tier": "G1", "dur": 3600, "vit": 15, "min": 400, "max": 800, "desc": "Kumpulin utang dari debitur lokal"},
-    "smuggle_s": {"name": "Small Smuggling", "tier": "G1", "dur": 7200, "vit": 20, "min": 1000, "max": 2000, "desc": "Selundupkan barang kecil"},
-    "pickpocket": {"name": "Pickpocket", "tier": "G1", "dur": 3600, "vit": 10, "min": 500, "max": 1200, "desc": "Curi dompet warga"},
-    "muscle": {"name": "Street Muscle", "tier": "G1", "dur": 5400, "vit": 18, "min": 600, "max": 1000, "desc": "Intimidasi target di jalanan"},
-    "drug_run": {"name": "Drug Runner", "tier": "G1", "dur": 10800, "vit": 25, "min": 1500, "max": 3000, "desc": "Antar paket narkoba ke distributor"},
+    # MAFIA OPERATIONAL JOBS
+    "debt": {"name": "Debt Collector", "tier": "G1", "category": "mafia", "dur": 3600, "vit": 15, "min": 400, "max": 800, "desc": "Kumpulin utang dari debitur lokal"},
+    "smuggle_s": {"name": "Small Smuggling", "tier": "G1", "category": "mafia", "dur": 7200, "vit": 20, "min": 1000, "max": 2000, "desc": "Selundupkan barang kecil"},
+    "pickpocket": {"name": "Pickpocket", "tier": "G1", "category": "mafia", "dur": 3600, "vit": 10, "min": 500, "max": 1200, "desc": "Curi dompet warga"},
+    "muscle": {"name": "Street Muscle", "tier": "G1", "category": "mafia", "dur": 5400, "vit": 18, "min": 600, "max": 1000, "desc": "Intimidasi target di jalanan"},
+    "drug_run": {"name": "Drug Runner", "tier": "G1", "category": "mafia", "dur": 10800, "vit": 25, "min": 1500, "max": 3000, "desc": "Antar paket narkoba ke distributor"},
 
-    # TIER 2: Enforcer Primus (G2)
-    "blackmail": {"name": "Blackmail Specialist", "tier": "G2", "dur": 7200, "vit": 20, "min": 2000, "max": 4000, "desc": "Ancam & peras target rentan"},
-    "protection": {"name": "Protected Territory", "tier": "G2", "dur": 14400, "vit": 30, "min": 2500, "max": 5000, "desc": "Pungut uang perlindungan pertokoan"},
-    "sabotage": {"name": "Sabotage Operation", "tier": "G2", "dur": 10800, "vit": 25, "min": 3000, "max": 6000, "desc": "Rusak fasilitas & aset musuh"},
-    "interrogate": {"name": "Interrogation", "tier": "G2", "dur": 7200, "vit": 22, "min": 1500, "max": 3500, "desc": "Interogasi paksa target"},
-    "arms_trade": {"name": "Arms Trading", "tier": "G2", "dur": 10800, "vit": 28, "min": 4000, "max": 7000, "desc": "Jual beli senjata gelap"},
+    "blackmail": {"name": "Blackmail Specialist", "tier": "G2", "category": "mafia", "dur": 7200, "vit": 20, "min": 2000, "max": 4000, "desc": "Ancam & peras target rentan"},
+    "protection": {"name": "Protected Territory", "tier": "G2", "category": "mafia", "dur": 14400, "vit": 30, "min": 2500, "max": 5000, "desc": "Pungut uang perlindungan pertokoan"},
+    "sabotage": {"name": "Sabotage Operation", "tier": "G2", "category": "mafia", "dur": 10800, "vit": 25, "min": 3000, "max": 6000, "desc": "Rusak fasilitas & aset musuh"},
+    "interrogate": {"name": "Interrogation", "tier": "G2", "category": "mafia", "dur": 7200, "vit": 22, "min": 1500, "max": 3500, "desc": "Interogasi paksa target"},
+    "arms_trade": {"name": "Arms Trading", "tier": "G2", "category": "mafia", "dur": 10800, "vit": 28, "min": 4000, "max": 7000, "desc": "Jual beli senjata gelap"},
 
-    # TIER 3: Capo Regime (G3)
-    "conquer": {"name": "Territorial Conquest", "tier": "G3", "dur": 18000, "vit": 35, "min": 5000, "max": 10000, "desc": "Ambil alih wilayah baru"},
-    "contract": {"name": "Hit Job Contract", "tier": "G3", "dur": 14400, "vit": 30, "min": 6000, "max": 12000, "desc": "Eksekusi kontrak pembunuhan"},
-    "heist_plan": {"name": "Heist Planning", "tier": "G3", "dur": 21600, "vit": 40, "min": 7000, "max": 15000, "desc": "Rencanakan perampokan besar"},
+    "conquer": {"name": "Territorial Conquest", "tier": "G3", "category": "mafia", "dur": 18000, "vit": 35, "min": 5000, "max": 10000, "desc": "Ambil alih wilayah baru"},
+    "contract": {"name": "Hit Job Contract", "tier": "G3", "category": "mafia", "dur": 14400, "vit": 30, "min": 6000, "max": 12000, "desc": "Eksekusi kontrak pembunuhan"},
+    "heist_plan": {"name": "Heist Planning", "tier": "G3", "category": "mafia", "dur": 21600, "vit": 40, "min": 7000, "max": 15000, "desc": "Rencanakan perampokan besar"},
 
-    # TIER 4: Underboss Executive (G4)
-    "corrupt": {"name": "Government Corruption", "tier": "G4", "dur": 18000, "vit": 35, "min": 10000, "max": 20000, "desc": "Suap pejabat publik"},
-    "bank_heist": {"name": "Major Bank Heist", "tier": "G4", "dur": 25200, "vit": 50, "min": 15000, "max": 30000, "desc": "Rampok bank nasional"},
+    "corrupt": {"name": "Government Corruption", "tier": "G4", "category": "mafia", "dur": 18000, "vit": 35, "min": 10000, "max": 20000, "desc": "Suap pejabat publik"},
+    "bank_heist": {"name": "Major Bank Heist", "tier": "G4", "category": "mafia", "dur": 25200, "vit": 50, "min": 15000, "max": 30000, "desc": "Rampok bank nasional"},
 
-    # TIER 5: Grand Consigliere (G5)
-    "policy": {"name": "National Policy Control", "tier": "G5", "dur": 21600, "vit": 40, "min": 20000, "max": 40000, "desc": "Kendalikan kebijakan hukum"},
-    "traffic": {"name": "International Trafficking", "tier": "G5", "dur": 28800, "vit": 50, "min": 25000, "max": 50000, "desc": "Penyelundupan internasional"},
+    "policy": {"name": "National Policy Control", "tier": "G5", "category": "mafia", "dur": 21600, "vit": 40, "min": 20000, "max": 40000, "desc": "Kendalikan kebijakan hukum"},
+    "traffic": {"name": "International Trafficking", "tier": "G5", "category": "mafia", "dur": 28800, "vit": 50, "min": 25000, "max": 50000, "desc": "Penyelundupan internasional"},
 
-    # TIER 6: Caporegime Supremo (G6)
-    "topple": {"name": "Topple Government", "tier": "G6", "dur": 43200, "vit": 60, "min": 60000, "max": 120000, "desc": "Gulingkan rezim pemerintahan"},
+    "topple": {"name": "Topple Government", "tier": "G6", "category": "mafia", "dur": 43200, "vit": 60, "min": 60000, "max": 120000, "desc": "Gulingkan rezim pemerintahan"},
+    "ultimate": {"name": "Ultimate World Domination", "tier": "G7", "category": "mafia", "dur": 108000, "vit": 80, "min": 200000, "max": 400000, "desc": "Kuasai tatanan dunia baru"},
 
-    # TIER 7: Don / Donna Famiglia (G7)
-    "ultimate": {"name": "Ultimate World Domination", "tier": "G7", "dur": 108000, "vit": 80, "min": 200000, "max": 400000, "desc": "Kuasai tatanan dunia baru"}
+    # POLICE & POLICE INFILTRATION JOBS (INTRIK POLISI & MAFIA)
+    "patrol": {"name": "Rondaan Patroli Kota", "tier": "G0", "category": "police", "dur": 3600, "vit": 10, "min": 600, "max": 1200, "desc": "Patroli ketertiban jalanan umum"},
+    "cop_bribe": {"name": "Polisi Terlibat Suap (Korupsi)", "tier": "G1", "category": "police", "dur": 7200, "vit": 15, "min": 1500, "max": 3500, "desc": "Terima uang damai dari bos kriminal jalanan"},
+    "undercover": {"name": "Penyusupan Intel Undercover", "tier": "G2", "category": "police", "dur": 10800, "vit": 25, "min": 3000, "max": 7000, "desc": "Menyamar sebagai anggota sindikat Cosa Nostra"},
+    "raid_lab": {"name": "Penggerebekan Lab Gelap", "tier": "G3", "category": "police", "dur": 14400, "vit": 35, "min": 6000, "max": 14000, "desc": "Serbu gudang penyimpan aset narkoba mafia"},
+    "mole_leak": {"name": "Bocorkan Informasi Intel (Mole)", "tier": "G4", "category": "police", "dur": 18000, "vit": 40, "min": 12000, "max": 25000, "desc": "Jual jadwal sergap polisi ke pihak Don Famiglia"},
+    "chief_protection": {"name": "Pelindung Ring Atas (Chief)", "tier": "G5", "category": "police", "dur": 28800, "vit": 50, "min": 25000, "max": 60000, "desc": "Hapus catatan kriminal & lindungi operasional kartel"}
 }
 
 CRIMES = {
@@ -287,14 +287,17 @@ def get_back_button():
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    current_username = update.effective_user.username or "TanpaUsername"
+    current_username = update.effective_user.username or update.effective_user.first_name or "TanpaUsername"
 
     async with get_db_connection() as db:
         await get_or_create_user(db, user_id, current_username)
 
     text = (
-        "⚔️ <b>SELAMAT DATANG DI COSA NOSTRA OPERATIONS BOT!</b>\n\n"
-        "Silakan pilih kategori operasi yang ingin Anda akses melalui tombol interaktif di bawah ini: 😉✨"
+        "⚔️ <b>SELAMAT DATANG DI PUSAT OPERASIONAL COSA NOSTRA</b>\n"
+        "──────────────────────────────────────────\n"
+        "<i>\"Loyalty, Strategy, and Supreme Command in Every Operation.\"</i>\n\n"
+        "Selamat datang di Portal Komando Utama Operasional Cosa Nostra Network. Kami siap memfasilitasi dan mengarahkan seluruh aktivitas penugasan taktis, eksekusi misi strategis bertingkat, penyamaran intelijen polisi, pengelolaan skuadron Crew, serta pengawasan status hukum anggota secara profesional dan aman.\n\n"
+        "Silakan pilih kategori operasional yang ingin Anda akses melalui opsi di bawah ini:"
     )
     if update.callback_query:
         query = update.callback_query
@@ -313,27 +316,28 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
 
     elif data == "opmenu_profile":
         text = (
-            "👤 <b>SUB-MENU PROFIL & STATUS</b>\n\n"
-            "• <code>/rekening</code> — Status Profil, Koin, & Vitality\n"
-            "• <code>/daily</code> — Klaim bonus koin harian gratis"
+            "👤 <b>SUB-MENU PROFIL & STATUS ANGGOTA</b>\n\n"
+            "• <code>/rekening</code> — Status Profil, Koin, Respect & Status Hukum\n"
+            "• <code>/bribe [jumlah]</code> — Suap petugas untuk kurangi masa tahanan/Heat\n"
+            "• <code>/daily</code> — Klaim tunjangan operasional harian gratis"
         )
         await query.edit_message_text(text, reply_markup=get_back_button(), parse_mode="HTML")
 
     elif data == "opmenu_jobs":
         text = (
-            "🔨 <b>SUB-MENU PEKERJAAN & MISI OPERASI</b>\n\n"
-            "• <code>/work</code> — Kerjakan tugas harian\n"
-            "• <code>/job</code> — Cek daftar misi operasi bertingkat\n"
-            "• <code>/job [kode_job]</code> — Jalankan misi operasi tertentu\n"
+            "🔨 <b>SUB-MENU PEKERJAAN & MISI INTRIK POLISI-MAFIA</b>\n\n"
+            "• <code>/work</code> — Kerjakan penugasan harian rutin\n"
+            "• <code>/job</code> — Cek seluruh opsi misi Mafia & Intrik Polisi\n"
+            "• <code>/job [kode_job]</code> — Jalankan penugasan atau misi penyamaran\n"
             "• <code>/crime</code> — Cek daftar opsi kejahatan berisiko\n"
-            "• <code>/crime [kode_crime]</code> — Eksekusi aksi kejahatan"
+            "• <code>/crime [kode_crime]</code> — Eksekusi aksi kejahatan lapangan"
         )
         await query.edit_message_text(text, reply_markup=get_back_button(), parse_mode="HTML")
 
     elif data == "opmenu_targets":
         text = (
-            "🎯 <b>SUB-MENU TARGET & BURONAN</b>\n\n"
-            "• <code>/hit [user_id]</code> — Eksekusi target secara langsung\n"
+            "🎯 <b>SUB-MENU TARGET & KONTRAK BURONAN</b>\n\n"
+            "• <code>/hit [user_id]</code> — Eksekusi target operasi secara langsung\n"
             "• <code>/bounty [user_id] [koin]</code> — Pasang kontrak imbalan buronan\n"
             "• <code>/wanted</code> — Lihat daftar buronan paling dicari"
         )
@@ -343,7 +347,7 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
         text = (
             "🏴‍☠️ <b>SUB-MENU ORGANISASI CREW</b>\n\n"
             "• <code>/crew</code> — Cek info status Crew kamu\n"
-            "• <code>/crew create [nama]</code> — Bikin Crew baru (Biaya: 50.000 Koin)\n"
+            "• <code>/crew create [nama]</code> — Buat Crew baru (Biaya: 50.000 Koin)\n"
             "• <code>/crew donate [jumlah]</code> — Setor donasi koin ke kas Crew"
         )
         await query.edit_message_text(text, reply_markup=get_back_button(), parse_mode="HTML")
@@ -354,7 +358,7 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
             tier = await check_admin_tier(db, user_id)
             if tier == 0:
                 return await query.edit_message_text(
-                    "🚫 <b>AKSES DITOLAK:</b> Anda tidak memiliki otoritas Administrator.",
+                    "🚫 <b>AKSES DITOLAK:</b> Anda tidak memiliki otoritas Administrator Operations.",
                     reply_markup=get_back_button(),
                     parse_mode="HTML"
                 )
@@ -362,7 +366,10 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
             text = (
                 f"🛠️ <b>OPERATIONS ADMIN PANEL</b>\n\n"
                 f"Level Otoritas Anda: <b>Tier {tier}</b>\n\n"
-                f"<b>Fitur Admin:</b>\n"
+                f"<b>Fitur Pengawasan Admin:</b>\n"
+                f"• <code>/cek_rekening [target_id]</code> (Tier 1+)\n"
+                f"• <code>/audit_ops [target_id]</code> (Tier 1+)\n\n"
+                f"<b>Fitur Admin Operasional:</b>\n"
                 f"• <code>/jail_user [user_id] [jam]</code> (Tier 1+)\n"
                 f"• <code>/unjail_user [user_id]</code> (Tier 2+)\n"
                 f"• <code>/clear_heat [user_id]</code> (Tier 3+)\n\n"
@@ -378,7 +385,7 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
 # ==========================================
 async def cmd_rekening(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    current_username = update.effective_user.username or "TanpaUsername"
+    current_username = update.effective_user.username or update.effective_user.first_name or "TanpaUsername"
     now_epoch = int(time.time())
 
     async with get_db_connection() as db:
@@ -418,7 +425,7 @@ async def cmd_rekening(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"⚡ Vitality: <b>{vitality}%</b>\n"
             f"🔥 Heat Level: <b>{heat}</b>\n"
             f"🏆 Respect: <b>{respect}</b>\n"
-            f"🎯 Bounty: <b>{bounty:,} Koin</b>\n"
+            f"🎯 Bounty Target: <b>{bounty:,} Koin</b>\n"
             f"Status Hukum: {jail_status}"
         )
         
@@ -426,7 +433,7 @@ async def cmd_rekening(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_work(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    current_username = update.effective_user.username or "TanpaUsername"
+    current_username = update.effective_user.username or update.effective_user.first_name or "TanpaUsername"
     now_epoch = int(time.time())
 
     async with get_db_connection() as db:
@@ -457,7 +464,7 @@ async def cmd_work(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await db.commit()
 
         await update.message.reply_text(
-            f"🔨 <b>KERJA SELESAI!</b>\n\n"
+            f"🔨 <b>PENUGASAN SELESAI!</b>\n\n"
             f"Gaji Dasar: +{base_pay:,} Koin\n"
             f"Bonus Gelar ({gelar}): +{gelar_bonus:,} Koin\n"
             f"Total Diterima: <b>+{total_income:,} Koin</b>\n"
@@ -467,7 +474,7 @@ async def cmd_work(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    current_username = update.effective_user.username or "TanpaUsername"
+    current_username = update.effective_user.username or update.effective_user.first_name or "TanpaUsername"
     now_epoch = int(time.time())
 
     async with get_db_connection() as db:
@@ -482,12 +489,12 @@ async def cmd_daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await db.execute("UPDATE users SET koin = koin + ?, last_daily = ? WHERE user_id = ?", (reward, now_epoch, user_id))
         await db.commit()
 
-        await update.message.reply_text(f"🎁 <b>BONUS HARIAN:</b> Anda mendapatkan <b>+{reward:,} Koin</b>!", parse_mode="HTML")
+        await update.message.reply_text(f"🎁 <b>TUNJANGAN HARIAN:</b> Anda mendapatkan <b>+{reward:,} Koin</b>!", parse_mode="HTML")
 
 async def cmd_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     user_id = update.effective_user.id
-    current_username = update.effective_user.username or "TanpaUsername"
+    current_username = update.effective_user.username or update.effective_user.first_name or "TanpaUsername"
     now_epoch = int(time.time())
 
     async with get_db_connection() as db:
@@ -507,21 +514,49 @@ async def cmd_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
             else:
                 j_info = JOBS[active_job]
+                
+                # Skenario Risiko Penyamaran Terbongkar Untuk Job Intel/Mole Polisi
+                if j_info.get("category") == "police" and random.randint(1, 100) <= 20:
+                    jail_until = now_epoch + 7200
+                    await db.execute(
+                        "UPDATE users SET jailed_until = ?, job_active = NULL, job_finish_time = 0 WHERE user_id = ?",
+                        (jail_until, user_id)
+                    )
+                    await db.commit()
+                    return await update.message.reply_text(
+                        f"🚨 <b>PENYAMARAN TERBONGKAR!</b>\n\n"
+                        f"Identitas Anda saat menjalankan <b>{j_info['name']}</b> terendus oleh pembunuh bayaran Cosa Nostra! "
+                        f"Anda berhasil selamat namun ditahan dalam sel isolasi selama 2 jam.",
+                        parse_mode="HTML"
+                    )
+
                 reward = random.randint(j_info["min"], j_info["max"])
+                heat_modifier = -5 if j_info.get("category") == "police" else 10
+
                 await db.execute(
-                    "UPDATE users SET koin = koin + ?, job_active = NULL, job_finish_time = 0 WHERE user_id = ?",
-                    (reward, user_id)
+                    "UPDATE users SET koin = koin + ?, heat = MAX(0, heat + ?), job_active = NULL, job_finish_time = 0 WHERE user_id = ?",
+                    (reward, heat_modifier, user_id)
                 )
                 await db.commit()
+
                 return await update.message.reply_text(
-                    f"🎉 <b>MISI BERHASIL!</b>\n\nAnda menyelesaikan <b>{j_info['name']}</b> dan mendapatkan <b>+{reward:,} Koin</b>!",
+                    f"🎉 <b>MISI STRATEGIS BERHASIL!</b>\n\n"
+                    f"Anda menyelesaikan <b>{j_info['name']}</b> dan memperoleh imbalan <b>+{reward:,} Koin</b>!",
                     parse_mode="HTML"
                 )
 
         if not args:
-            text = "💼 <b>DAFTAR MISI JOB TERSEDIA</b>\n\nGunakan <code>/job [job_code]</code> untuk memulai:\n\n"
+            text = "💼 <b>DAFTAR MISI JOB & INTRIK POLISI-MAFIA</b>\n\nGunakan <code>/job [job_code]</code> untuk menjalankan penugasan:\n\n"
+            text += "<b>🔴 MISI OPERASIONAL COSA NOSTRA:</b>\n"
             for code, j in JOBS.items():
-                text += f"• <code>[{code}]</code> <b>{j['name']}</b> ({j['tier']}+)\n  Durasi: {j['dur']//3600}j | Hasil: {j['min']:,}-{j['max']:,} Koin\n"
+                if j.get("category") == "mafia":
+                    text += f"• <code>[{code}]</code> <b>{j['name']}</b> ({j['tier']}+)\n  Durasi: {j['dur']//3600}j | Hasil: {j['min']:,}-{j['max']:,} Koin\n"
+            
+            text += "\n<b>🔵 MISI INTRIK & PENYAMARAN POLISI:</b>\n"
+            for code, j in JOBS.items():
+                if j.get("category") == "police":
+                    text += f"• <code>[{code}]</code> <b>{j['name']}</b> ({j['tier']}+)\n  Durasi: {j['dur']//3600}j | Hasil: {j['min']:,}-{j['max']:,} Koin\n"
+
             return await update.message.reply_text(text, parse_mode="HTML")
 
         job_code = args[0].lower()
@@ -550,6 +585,7 @@ async def cmd_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.message.reply_text(
             f"🚀 <b>MISI DIMULAI: {j['name']}</b>\n\n"
+            f"Kategori Misi: <b>{j.get('category', 'umum').upper()}</b>\n"
             f"Durasi: {j['dur']//3600} Jam\n"
             f"Proyeksi Hasil: {j['min']:,} - {j['max']:,} Koin\n"
             f"Ketik <code>/job</code> kembali setelah durasi selesai untuk mengambil hasil.",
@@ -559,7 +595,7 @@ async def cmd_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_crime(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     user_id = update.effective_user.id
-    current_username = update.effective_user.username or "TanpaUsername"
+    current_username = update.effective_user.username or update.effective_user.first_name or "TanpaUsername"
     now_epoch = int(time.time())
 
     async with get_db_connection() as db:
@@ -569,9 +605,9 @@ async def cmd_crime(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return await update.message.reply_text("🔒 Anda sedang mendekam di sel penjara!")
 
         if not args:
-            text = "🕵️ <b>DAFTAR AKSI KEJAHATAN</b>\n\nGunakan <code>/crime [crime_code]</code>:\n\n"
+            text = "🕵️ <b>DAFTAR AKSI KEJAHATAN TAKTIS</b>\n\nGunakan <code>/crime [crime_code]</code>:\n\n"
             for code, c in CRIMES.items():
-                text += f"• <code>[{code}]</code> <b>{c['desc']}</b>\n  Hasil: {c['min']:,}-{c['max']:,} Koin | Risiko Tertangkap: {c['risk']}%\n"
+                text += f"• <code>[{code}]</code> <b>{c['desc']}</b>\n  Hasil: {c['min']:,}-{c['max']:,} Koin | Risiko Dasar: {c['risk']}%\n"
             return await update.message.reply_text(text, parse_mode="HTML")
 
         crime_code = args[0].lower()
@@ -579,8 +615,11 @@ async def cmd_crime(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return await update.message.reply_text("❌ Kode aksi kejahatan tidak valid.")
 
         c = CRIMES[crime_code]
+        user_heat = user[7]
+        
+        effective_risk = min(95, c["risk"] + int(user_heat * 0.5))
 
-        if random.randint(1, 100) <= c["risk"]:
+        if random.randint(1, 100) <= effective_risk:
             jail_until = now_epoch + c["jail"]
             fine = c["min"] // 2
 
@@ -591,7 +630,8 @@ async def cmd_crime(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await db.commit()
 
             return await update.message.reply_text(
-                f"🚨 <b>AKSI GAGAL! ANDA TERTANGKAP POLISI!</b>\n\n"
+                f"🚨 <b>AKSI GAGAL! TERTANGKAP POLISI</b>\n\n"
+                f"Risiko Efektif Terdeteksi: <b>{effective_risk}%</b> (Heat Penalty: +{int(user_heat * 0.5)}%)\n"
                 f"Denda Disita: -{fine:,} Koin\n"
                 f"Heat Bertambah: +{c['heat']}\n"
                 f"Mendekam di Penjara: {c['jail']//3600} Jam",
@@ -613,10 +653,42 @@ async def cmd_crime(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML"
         )
 
+async def cmd_bribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    current_username = update.effective_user.username or update.effective_user.first_name or "TanpaUsername"
+    now_epoch = int(time.time())
+
+    async with get_db_connection() as db:
+        user = await get_or_create_user(db, user_id, current_username)
+        koin = user[2]
+        jailed_until = user[10]
+        heat = user[7]
+
+        if jailed_until > now_epoch:
+            bribe_cost = 50000
+            if koin < bribe_cost:
+                return await update.message.reply_text(f"❌ Saldo Koin tidak cukup untuk menyuap sipir! Biaya: <b>{bribe_cost:,} Koin</b>", parse_mode="HTML")
+
+            await db.execute("UPDATE users SET koin = koin - ?, jailed_until = 0 WHERE user_id = ?", (bribe_cost, user_id))
+            await db.commit()
+            return await update.message.reply_text(f"💵 <b>SUAP BEBAS PENJARA BERHASIL:</b> Anda membayar <b>{bribe_cost:,} Koin</b> dan langsung dibebaskan!", parse_mode="HTML")
+
+        elif heat > 0:
+            bribe_cost = heat * 1000
+            if koin < bribe_cost:
+                return await update.message.reply_text(f"❌ Saldo Koin tidak cukup untuk menyuap aparat! Biaya pembersihan Heat: <b>{bribe_cost:,} Koin</b>", parse_mode="HTML")
+
+            await db.execute("UPDATE users SET koin = koin - ?, heat = 0 WHERE user_id = ?", (bribe_cost, user_id))
+            await db.commit()
+            return await update.message.reply_text(f"💵 <b>SUAP BEBAS HEAT BERHASIL:</b> Membayar <b>{bribe_cost:,} Koin</b>. Heat Level kembali ke 0!", parse_mode="HTML")
+
+        else:
+            return await update.message.reply_text("ℹ️ Anda tidak dalam penjara dan Heat Level Anda sudah 0.")
+
 async def cmd_bounty(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     user_id = update.effective_user.id
-    current_username = update.effective_user.username or "TanpaUsername"
+    current_username = update.effective_user.username or update.effective_user.first_name or "TanpaUsername"
 
     if len(args) < 2 or not args[0].isdigit() or not args[1].isdigit():
         return await update.message.reply_text("❌ Format: <code>/bounty [target_user_id] [jumlah_koin]</code>", parse_mode="HTML")
@@ -649,7 +721,7 @@ async def cmd_bounty(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_hit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     user_id = update.effective_user.id
-    current_username = update.effective_user.username or "TanpaUsername"
+    current_username = update.effective_user.username or update.effective_user.first_name or "TanpaUsername"
     now_epoch = int(time.time())
 
     if not args or not args[0].isdigit():
@@ -714,7 +786,7 @@ async def cmd_wanted(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_crew(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     user_id = update.effective_user.id
-    current_username = update.effective_user.username or "TanpaUsername"
+    current_username = update.effective_user.username or update.effective_user.first_name or "TanpaUsername"
     now_epoch = int(time.time())
 
     async with get_db_connection() as db:
@@ -782,6 +854,80 @@ async def cmd_crew(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return await update.message.reply_text(f"✅ Berhasil mendonasikan <b>{donate_amount:,} Koin</b> ke Treasury Crew.", parse_mode="HTML")
 
 # ==========================================
+# ADMIN INSPECTION & CONTROL COMMANDS
+# ==========================================
+async def cmd_cek_rekening_ops(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    async with get_db_connection() as db:
+        tier = await check_admin_tier(db, user_id)
+        if tier < 1:
+            return await update.message.reply_text("🚫 Butuh akses Admin Tier 1+.")
+
+        if not context.args or not context.args[0].isdigit():
+            return await update.message.reply_text("❌ Format: <code>/cek_rekening [target_id]</code>", parse_mode="HTML")
+
+        target_id = int(context.args[0])
+        async with db.execute(f"SELECT {USER_COLUMNS} FROM users WHERE user_id = ?", (target_id,)) as cursor:
+            target = await cursor.fetchone()
+
+        if not target:
+            return await update.message.reply_text(f"❌ Target User ID <code>{target_id}</code> tidak ditemukan.", parse_mode="HTML")
+
+        jail_status = "BEBAS" if target[10] <= int(time.time()) else f"PENJARA ({target[10] - int(time.time())}d)"
+
+        text = (
+            f"🔍 <b>OPERATIONS INSPECTION PANEL</b>\n\n"
+            f"Target ID: <code>{target_id}</code> (@{target[1]})\n"
+            f"Gelar Pangkat: <b>{target[6]}</b>\n"
+            f"Status Hukum: <b>{jail_status}</b>\n"
+            f"───────────────────\n"
+            f"💵 Cash Tunai: <b>{target[2]:,} Koin</b>\n"
+            f"🏦 Saldo Bank: <b>{target[3]:,} Koin</b>\n"
+            f"⚡ Vitality: <b>{target[5]}%</b>\n"
+            f"🔥 Heat Level: <b>{target[7]}</b>\n"
+            f"🏆 Respect: <b>{target[8]}</b>\n"
+            f"🎯 Bounty: <b>{target[11]:,} Koin</b>\n"
+            f"🏴‍☠️ Crew ID: <b>{target[12]}</b>"
+        )
+        await update.message.reply_text(text, parse_mode="HTML")
+
+async def cmd_audit_ops(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    async with get_db_connection() as db:
+        tier = await check_admin_tier(db, user_id)
+        if tier < 1:
+            return await update.message.reply_text("🚫 Butuh akses Admin Tier 1+.")
+
+        if not context.args or not context.args[0].isdigit():
+            return await update.message.reply_text("❌ Format: <code>/audit_ops [target_id]</code>", parse_mode="HTML")
+
+        target_id = int(context.args[0])
+        async with db.execute(f"SELECT {USER_COLUMNS} FROM users WHERE user_id = ?", (target_id,)) as cursor:
+            target = await cursor.fetchone()
+
+        if not target:
+            return await update.message.reply_text(f"❌ Target ID <code>{target_id}</code> tidak ada.", parse_mode="HTML")
+
+        flags = []
+        if target[7] > 200:
+            flags.append("⚠️ Heat Level sangat tinggi (>200)")
+        if target[8] > 5000 and target[13] == 0:
+            flags.append("⚠️ Respect sangat tinggi tanpa rekam jejak kerja")
+        if target[2] > 20_000_000:
+            flags.append("⚠️ Memiliki saldo tunai melimpah (>20 Juta koin)")
+
+        status = "🚨 <b>TERLIHAT MENCURIGAKAN!</b>" if flags else "✅ <b>AKUN NORMAL</b>"
+        details = "\n".join(flags) if flags else "• Tidak ada anomali aktivitas operasi."
+
+        text = (
+            f"🛡️ <b>SYSTEM OPERATIONAL AUDIT</b>\n\n"
+            f"Target ID: <code>{target_id}</code> (@{target[1]})\n"
+            f"Hasil Evaluasi: {status}\n\n"
+            f"<b>Catatan Audit:</b>\n{details}"
+        )
+        await update.message.reply_text(text, parse_mode="HTML")
+
+# ==========================================
 # ADMIN & CHEAT COMMANDS
 # ==========================================
 async def cmd_admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -794,7 +940,10 @@ async def cmd_admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = (
             f"🛠️ <b>OPERATIONS ADMIN & CHEAT PANEL</b>\n\n"
             f"Level Otoritas Anda: <b>Tier {tier}</b>\n\n"
-            f"<b>Fitur Admin:</b>\n"
+            f"<b>Fitur Pengawasan Admin:</b>\n"
+            f"• <code>/cek_rekening [target_id]</code>\n"
+            f"• <code>/audit_ops [target_id]</code>\n\n"
+            f"<b>Fitur Admin Operasional:</b>\n"
             f"• <code>/jail_user [user_id] [jam]</code>\n"
             f"• <code>/unjail_user [user_id]</code>\n"
             f"• <code>/clear_heat [user_id]</code>\n\n"
@@ -925,16 +1074,23 @@ def build_app():
     app.add_handler(CommandHandler("daily", cmd_daily))
     app.add_handler(CommandHandler("job", cmd_job))
     app.add_handler(CommandHandler("crime", cmd_crime))
+    app.add_handler(CommandHandler("bribe", cmd_bribe))
     app.add_handler(CommandHandler("bounty", cmd_bounty))
     app.add_handler(CommandHandler("hit", cmd_hit))
     app.add_handler(CommandHandler("wanted", cmd_wanted))
     app.add_handler(CommandHandler("crew", cmd_crew))
 
-    # Admin & Cheat Commands
+    # Admin Inspection Commands
+    app.add_handler(CommandHandler("cek_rekening", cmd_cek_rekening_ops))
+    app.add_handler(CommandHandler("cek_user", cmd_cek_rekening_ops))
+    app.add_handler(CommandHandler("audit_ops", cmd_audit_ops))
+
+    # Admin Control & Cheat Commands
     app.add_handler(CommandHandler("admin_panel", cmd_admin_panel))
     app.add_handler(CommandHandler("jail_user", cmd_jail_user))
     app.add_handler(CommandHandler("unjail_user", cmd_unjail_user))
     app.add_handler(CommandHandler("clear_heat", cmd_clear_heat))
+    app.add_handler(CommandHandler("reset_heat", cmd_clear_heat))
     app.add_handler(CommandHandler("cheat_godmode", cmd_cheat_godmode))
     app.add_handler(CommandHandler("cheat_instant_work", cmd_cheat_instant_work))
     app.add_handler(CommandHandler("cheat_clear_bounty", cmd_cheat_clear_bounty))
