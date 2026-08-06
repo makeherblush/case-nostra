@@ -395,8 +395,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await get_or_create_user(db, user_id, username)
 
     text = (
-        "💰 <b>SELAMAT DATANG DI COSA NOSTRA VAULT BOT!</b>\n\n"
-        "Silakan pilih kategori layanan perbankan & belanja melalui tombol interaktif di bawah ini: 😉✨"
+        "🏛️ <b>SELAMAT DATANG DI PUSAT VAULT & PERBANKAN COSA NOSTRA</b>\n"
+        "──────────────────────────────────────────\n"
+        "<i>\"Honor, Loyalty, and Excellence in Every Transaction.\"</i>\n\n"
+        "Selamat datang di Portal Administrasi Finansial & Vault Utama. Kami siap melayani serta memfasilitasi seluruh kebutuhan transaksi perbankan, perolehan aset premium, kepemilikan sertifikasi digital, dan manajemen investasi pasif Anda secara profesional, transparan, dan aman.\n\n"
+        "Silakan pilih kategori layanan yang Anda butuhkan melalui tombol interaktif di bawah ini:"
     )
     if update.callback_query:
         query = update.callback_query
@@ -436,7 +439,7 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
         text = (
             "🏦 <b>SUB-MENU LAYANAN BANK & REKENING</b>\n\n"
             "• <code>/bank balance</code> — Cek saldo tunai, bank, & hutang\n"
-            "• <code>/bank deposit [jumlah]</code> — Setor uang ke bank\n"
+            "• <code>/bank deposit [jumlah]</code> — Setor uang ke bank (Laundromat Fee 2%)\n"
             "• <code>/bank withdraw [jumlah]</code> — Tarik uang dari bank\n"
             "• <code>/bank loan [jumlah]</code> — Ajukan pinjaman ke bank (Maks: 500k)\n"
             "• <code>/bank payloan [jumlah]</code> — Bayar hutang pinjaman bank"
@@ -479,7 +482,11 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
                 f"Level Otoritas Anda: <b>Tier {tier}</b>\n"
                 f"Total Pengguna Terdaftar: <b>{total_users:,}</b>\n"
                 f"Total Koin Beredar: <b>{total_circulation or 0:,} Koin</b>\n\n"
-                f"<b>Fitur Admin:</b>\n"
+                f"<b>Fitur Pengawasan Admin:</b>\n"
+                f"• <code>/cek_rekening [target_id]</code> (Tier 1+)\n"
+                f"• <code>/audit_user [target_id]</code> (Tier 1+)\n"
+                f"• <code>/reset_user [target_id]</code> (Tier 2+)\n\n"
+                f"<b>Fitur Admin Lainnya:</b>\n"
                 f"• <code>/override_balance [user_id] [jumlah] [alasan]</code> (Tier 2+)\n"
                 f"• <code>/broadcast [pesan]</code> (Tier 3+)\n"
                 f"• <code>/set_admin [user_id] [tier_0-4]</code> (Tier 4)\n\n"
@@ -491,7 +498,7 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
             await query.edit_message_text(text, reply_markup=get_back_button(), parse_mode="HTML")
 
 # ==========================================
-# COMMAND HANDLERS
+# PUBLIC COMMAND HANDLERS
 # ==========================================
 async def cmd_shop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
@@ -629,9 +636,19 @@ async def cmd_bank(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if action == "deposit":
             if amount <= 0 or amount > koin:
                 return await update.message.reply_text("❌ Jumlah deposit tidak valid!")
-            await db.execute("UPDATE users SET koin = koin - ?, bank_balance = bank_balance + ? WHERE user_id = ?", (amount, amount, user_id))
+            
+            fee = int(amount * 0.02)
+            net_deposit = amount - fee
+
+            await db.execute("UPDATE users SET koin = koin - ?, bank_balance = bank_balance + ? WHERE user_id = ?", (amount, net_deposit, user_id))
             await db.commit()
-            return await update.message.reply_text(f"✅ Berhasil menabung <b>{amount:,} Koin</b> ke Bank.", parse_mode="HTML")
+            return await update.message.reply_text(
+                f"✅ <b>DEPOSIT BERHASIL</b>\n\n"
+                f"Jumlah Setoran: {amount:,} Koin\n"
+                f"Biaya Pencucian Uang (2%): -{fee:,} Koin\n"
+                f"Net Saldo Diterima: <b>+{net_deposit:,} Koin</b>",
+                parse_mode="HTML"
+            )
 
         elif action == "withdraw":
             if amount <= 0 or amount > bank_balance:
@@ -761,7 +778,136 @@ async def cmd_certificate(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(text, parse_mode="HTML")
 
 # ==========================================
-# ADMIN & CHEAT COMMANDS
+# ADMIN INSPECTION & CHEAT DETECTION COMMANDS
+# ==========================================
+async def cmd_cek_rekening(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Fitur Admin untuk mengecek seluruh saldo, aset, dan status user secara detail."""
+    user_id = update.effective_user.id
+    async with get_db_connection() as db:
+        tier = await check_admin_tier(db, user_id)
+        if tier < 1:
+            return await update.message.reply_text("🚫 <b>AKSES DITOLAK:</b> Anda butuh wewenang Admin Tier 1+.", parse_mode="HTML")
+
+        if not context.args or not context.args[0].isdigit():
+            return await update.message.reply_text("❌ Format: <code>/cek_rekening [target_user_id]</code>", parse_mode="HTML")
+
+        target_id = int(context.args[0])
+        async with db.execute(f"SELECT {USER_COLUMNS} FROM users WHERE user_id = ?", (target_id,)) as cursor:
+            target = await cursor.fetchone()
+
+        if not target:
+            return await update.message.reply_text(f"❌ User ID <code>{target_id}</code> tidak ditemukan di database.", parse_mode="HTML")
+
+        async with db.execute("SELECT item_code FROM inventory WHERE user_id = ?", (target_id,)) as inv_cur:
+            items = await inv_cur.fetchall()
+        
+        total_asset_val = sum([CATALOG.get(code[0], {}).get("price", 0) for code in items])
+
+        t_username = target[1]
+        t_koin = target[2]
+        t_bank = target[3]
+        t_loan = target[4]
+        t_vitality = target[5]
+        t_gelar = target[6]
+        t_heat = target[7]
+        t_respect = target[8]
+        t_jailed = target[10]
+        t_bounty = target[11]
+
+        jail_status = "BEBAS" if t_jailed <= int(time.time()) else f"DIPENJARA ({t_jailed - int(time.time())} detik)"
+
+        text = (
+            f"🔍 <b>INSPEKSI REKENING & FINANSIAL USER</b>\n\n"
+            f"User ID: <code>{target_id}</code> (@{t_username})\n"
+            f"Gelar / Tier: <b>{t_gelar}</b>\n"
+            f"Status Hukum: <b>{jail_status}</b>\n"
+            f"───────────────────\n"
+            f"💵 Cash Tunai: <b>{t_koin:,} Koin</b>\n"
+            f"🏦 Saldo Bank: <b>{t_bank:,} Koin</b>\n"
+            f"⚠️ Hutang Pinjaman: <b>{t_loan:,} Koin</b>\n"
+            f"💎 Total Nilai Aset Shop: <b>{total_asset_val:,} Koin</b>\n"
+            f"💰 <b>TOTAL KEKAYAAN BERSIH: {(t_koin + t_bank + total_asset_val - t_loan):,} Koin</b>\n"
+            f"───────────────────\n"
+            f"⚡ Vitality: {t_vitality}%\n"
+            f"🔥 Heat Level: {t_heat}\n"
+            f"🏆 Respect: {t_respect}\n"
+            f"🎯 Bounty Target: {t_bounty:,} Koin\n"
+            f"📦 Total Unit Barang: {len(items)} Item"
+        )
+        await update.message.reply_text(text, parse_mode="HTML")
+
+async def cmd_audit_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Fitur Admin untuk mendeteksi potensi kecurangan/kejadian tidak wajar."""
+    user_id = update.effective_user.id
+    async with get_db_connection() as db:
+        tier = await check_admin_tier(db, user_id)
+        if tier < 1:
+            return await update.message.reply_text("🚫 <b>AKSES DITOLAK:</b> Anda butuh wewenang Admin Tier 1+.", parse_mode="HTML")
+
+        if not context.args or not context.args[0].isdigit():
+            return await update.message.reply_text("❌ Format: <code>/audit_user [target_user_id]</code>", parse_mode="HTML")
+
+        target_id = int(context.args[0])
+        async with db.execute(f"SELECT {USER_COLUMNS} FROM users WHERE user_id = ?", (target_id,)) as cursor:
+            target = await cursor.fetchone()
+
+        if not target:
+            return await update.message.reply_text(f"❌ User ID <code>{target_id}</code> tidak ditemukan.", parse_mode="HTML")
+
+        async with db.execute("SELECT item_code FROM inventory WHERE user_id = ?", (target_id,)) as inv_cur:
+            items = await inv_cur.fetchall()
+
+        total_koin = target[2] + target[3]
+        total_items = len(items)
+
+        red_flags = []
+        if total_koin > 50_000_000:
+            red_flags.append("⚠️ Saldo koin melebihi batas wajar (>50 Juta koin)")
+        if total_items > 50:
+            red_flags.append("⚠️ Memiliki inventaris berlebihan (>50 item)")
+        if target[2] > 10_000_000 and target[13] == 0:
+            red_flags.append("⚠️ Saldo tunai sangat tinggi tetapi tidak memiliki rekam jejak kerja")
+
+        flag_status = "🚨 <b>DITEMUKAN KEJANGGALAN!</b>" if red_flags else "✅ <b>AKUN NORMAL (BEBAS CURIGA)</b>"
+        details_txt = "\n".join(red_flags) if red_flags else "• Tidak ada indikasi cheat yang mencurigakan."
+
+        text = (
+            f"🛡️ <b>SYSTEM AUDIT CHEAT DETECTION</b>\n\n"
+            f"Target ID: <code>{target_id}</code> (@{target[1]})\n"
+            f"Status Hasil Audit: {flag_status}\n\n"
+            f"<b>Detail Catatan Sistem:</b>\n{details_txt}"
+        )
+        await update.message.reply_text(text, parse_mode="HTML")
+
+async def cmd_reset_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Fitur Admin Tier 2+ untuk mereset koin & sita aset user yang terbukti ngecheat."""
+    user_id = update.effective_user.id
+    async with get_db_connection() as db:
+        tier = await check_admin_tier(db, user_id)
+        if tier < 2:
+            return await update.message.reply_text("🚫 <b>AKSES DITOLAK:</b> Butuh akses Admin Tier 2+.", parse_mode="HTML")
+
+        if not context.args or not context.args[0].isdigit():
+            return await update.message.reply_text("❌ Format: <code>/reset_user [target_user_id]</code>", parse_mode="HTML")
+
+        target_id = int(context.args[0])
+
+        await db.execute("UPDATE users SET koin = 10000, bank_balance = 0, bank_loan = 0, gelar_tier = 'G0' WHERE user_id = ?", (target_id,))
+        await db.execute("DELETE FROM inventory WHERE user_id = ?", (target_id,))
+        await db.execute("DELETE FROM certificates WHERE user_id = ?", (target_id,))
+        await db.commit()
+
+        await update.message.reply_text(
+            f"⚖️ <b>SANKSI ADMIN DITERAPKAN!</b>\n\n"
+            f"Akun ID <code>{target_id}</code> telah di-reset:\n"
+            f"• Saldo dikembalikan ke standar awal (10.000 Koin)\n"
+            f"• Seluruh inventaris & sertifikat disita\n"
+            f"• Gelar diturunkan ke G0",
+            parse_mode="HTML"
+        )
+
+# ==========================================
+# ADMIN CONTROL & CHEAT COMMANDS
 # ==========================================
 async def cmd_admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -778,7 +924,11 @@ async def cmd_admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Level Otoritas Anda: <b>Tier {tier}</b>\n"
             f"Total Pengguna Terdaftar: <b>{total_users:,}</b>\n"
             f"Total Koin Beredar: <b>{total_circulation or 0:,} Koin</b>\n\n"
-            f"<b>Fitur Admin:</b>\n"
+            f"<b>Fitur Pengawasan Admin:</b>\n"
+            f"• <code>/cek_rekening [target_id]</code>\n"
+            f"• <code>/audit_user [target_id]</code>\n"
+            f"• <code>/reset_user [target_id]</code>\n\n"
+            f"<b>Fitur Admin Lainnya:</b>\n"
             f"• <code>/override_balance [user_id] [jumlah] [alasan]</code>\n"
             f"• <code>/broadcast [pesan]</code>\n"
             f"• <code>/set_admin [user_id] [tier_0-4]</code>\n\n"
@@ -951,7 +1101,12 @@ def build_app():
     app.add_handler(CommandHandler("inventory", cmd_portfolio))
     app.add_handler(CommandHandler("certificate", cmd_certificate))
 
-    # Admin & Cheat Commands
+    # Admin Inspection Commands
+    app.add_handler(CommandHandler("cek_rekening", cmd_cek_rekening))
+    app.add_handler(CommandHandler("audit_user", cmd_audit_user))
+    app.add_handler(CommandHandler("reset_user", cmd_reset_user))
+
+    # Admin Control & Cheat Commands
     app.add_handler(CommandHandler("admin_panel", cmd_admin_panel))
     app.add_handler(CommandHandler("override_balance", cmd_override_balance))
     app.add_handler(CommandHandler("broadcast", cmd_broadcast))
