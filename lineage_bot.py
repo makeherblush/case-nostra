@@ -47,6 +47,9 @@ PROPOSAL_EXPIRY_CHECK_INTERVAL = 60     # background loop cek tiap 60 detik
 # State untuk ConversationHandler Register KTP
 REG_NAMA, REG_MUSE, REG_UMUR, REG_TGLLAHIR = range(4)
 
+# State untuk ConversationHandler Admin Edit KTP
+ADMIN_EDIT_CHOICE, ADMIN_EDIT_VALUE = range(4, 6)
+
 BLACKLISTED_FAMILY_NAMES = {
     "ADMIN", "ADMINISTRATOR", "OFFICIAL", "SYSTEM", "MOD", "MODERATOR",
     "COSA NOSTRA", "COSA_NOSTRA", "COSA NOSTRA OFFICIAL", "OWNER", "STAFF",
@@ -467,7 +470,8 @@ async def reg_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if await user_exists(db, user_id):
             await update.message.reply_text(
                 "💁‍♀️ <b>Kakak Sudah Terdaftar!</b>\n\n"
-                "KTP Kakak sudah ada di database. Ketik <code>/ktp</code> untuk melihat Kartu Identitas Kakak!",
+                "KTP Kakak sudah tercatat di database. Ketik <code>/ktp</code> untuk melihat data KTP Kakak.\n\n"
+                "⚠️ <b>Apabila ada kesalahan data pada KTP, segera hubungi Admin ya!</b>",
                 parse_mode="HTML"
             )
             return ConversationHandler.END
@@ -524,12 +528,11 @@ async def reg_tgl_lahir(update: Update, context: ContextTypes.DEFAULT_TYPE):
     muse = context.user_data.get('muse', 'Tidak Ada')
     umur = context.user_data.get('umur', 18)
     tgl = update.message.text.strip()
-    status_sipil = "Lajang"  # Otomatis Lajang untuk pendaftaran baru
+    status_sipil = "Lajang"
 
     async with get_db_connection() as db:
         await ensure_all_tables_exist(db)
         
-        # Ambil gelar_tier untuk dijadikan Jabatan / Pekerjaan
         async with db.execute("SELECT gelar_tier FROM users WHERE user_id = ?", (user_id,)) as cursor:
             row = await cursor.fetchone()
             gelar = row[0] if row and row[0] else 'G0 (Warga Sipil)'
@@ -556,14 +559,130 @@ async def reg_tgl_lahir(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"💳 <b>ID Citizen   :</b> <code>{user_id}</code>\n"
         f"💰 <b>Saldo Awal   :</b> 10,000 Koin\n\n"
         "🎉 <i>Pendaftaran KTP Berhasil! Status kamu otomatis LAJANG.\n"
-        "Jika kamu sudah punya pasangan nikah di RP sebelumnya, daftarkan lewat <code>/register_marriage [user_id_pasangan]</code> ya!</i>"
+        "⚠️ <b>Catatan:</b> Jika ada kesalahan saat memasukkan data KTP, segera hubungi Admin untuk melakukan perbaikan!</i>"
     )
 
     await update.message.reply_text(ktp_card, parse_mode="HTML")
     return ConversationHandler.END
 
 async def reg_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("❌ Pendaftaran KTP dibatalkan. Ketik <code>/register</code> kapan saja jika ingin mendaftar ulang!", parse_mode="HTML")
+    await update.message.reply_text("❌ Proses dibatalkan. Ketik <code>/start</code> untuk kembali ke menu utama!", parse_mode="HTML")
+    return ConversationHandler.END
+
+# ==========================================
+# CONVERSATION HANDLER: EDIT KTP (KHUSUS ADMIN)
+# ==========================================
+async def edit_ktp_admin_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    target_id = parse_target_id(context)
+
+    async with get_db_connection() as db:
+        await ensure_all_tables_exist(db)
+        tier = await check_admin_tier(db, user_id)
+        if tier < 1:
+            return await update.message.reply_text(
+                "🚫 <b>AKSES DITOLAK:</b> Pengubahan data KTP hanya bisa dilakukan oleh Admin.\n\n"
+                "📩 Jika Kakak salah memasukkan data saat pendaftaran KTP, silakan <b>segera hubungi Admin</b> ya!",
+                parse_mode="HTML"
+            )
+
+        if target_id is None:
+            return await update.message.reply_text(
+                "🛠️ <b>FORMAT ADMIN EDIT KTP:</b>\n\n"
+                "Gunakan: <code>/edit_ktp [user_id_warga]</code>\n"
+                "Contoh: <code>/edit_ktp 123456789</code>",
+                parse_mode="HTML"
+            )
+
+        if not await user_exists(db, target_id):
+            return await update.message.reply_text(f"❌ User ID <code>{target_id}</code> tidak ditemukan di database.", parse_mode="HTML")
+
+    context.user_data['admin_edit_target_id'] = target_id
+
+    keyboard = [
+        [InlineKeyboardButton("👤 Nama Lengkap", callback_data="admin_edit_nama_lengkap")],
+        [InlineKeyboardButton("🎭 Muse / Avatar", callback_data="admin_edit_muse")],
+        [InlineKeyboardButton("🎂 Umur Karakter", callback_data="admin_edit_umur")],
+        [InlineKeyboardButton("📅 Tanggal Lahir", callback_data="admin_edit_tanggal_lahir")],
+        [InlineKeyboardButton("❌ Batal", callback_data="admin_edit_cancel")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.message.reply_text(
+        f"🛠️ <b>ADMIN PANEL — EDIT KTP WARGA</b>\n\n"
+        f"Target User ID: <code>{target_id}</code>\n"
+        f"Pilih bidang yang ingin diubah:",
+        reply_markup=reply_markup,
+        parse_mode="HTML"
+    )
+    return ADMIN_EDIT_CHOICE
+
+async def edit_ktp_admin_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+
+    if data == "admin_edit_cancel":
+        await query.edit_message_text("❌ Edit KTP oleh Admin dibatalkan.")
+        return ConversationHandler.END
+
+    field_map = {
+        "admin_edit_nama_lengkap": ("nama_lengkap", "Masukkan **NAMA LENGKAP** baru untuk warga:"),
+        "admin_edit_muse": ("muse", "Masukkan **MUSE / AVATAR** baru untuk warga:"),
+        "admin_edit_umur": ("umur", "Masukkan **UMUR** baru untuk warga (Angka):"),
+        "admin_edit_tanggal_lahir": ("tanggal_lahir", "Masukkan **TANGGAL LAHIR** baru untuk warga (DD-MM-YYYY):")
+    }
+
+    if data in field_map:
+        db_col, prompt = field_map[data]
+        context.user_data['admin_edit_col'] = db_col
+        await query.edit_message_text(f"✏️ {prompt}", parse_mode="HTML")
+        return ADMIN_EDIT_VALUE
+
+    return ADMIN_EDIT_CHOICE
+
+async def edit_ktp_admin_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    target_id = context.user_data.get('admin_edit_target_id')
+    target_col = context.user_data.get('admin_edit_col')
+    new_value = update.message.text.strip()
+
+    if target_col == "umur":
+        if not new_value.isdigit():
+            await update.message.reply_text("❌ Umur harus berupa angka! Masukkan ulang angkanya:")
+            return ADMIN_EDIT_VALUE
+        new_value = int(new_value)
+
+    async with get_db_connection() as db:
+        await ensure_all_tables_exist(db)
+        await db.execute(f"UPDATE users SET {target_col} = ? WHERE user_id = ?", (new_value, target_id))
+        await db.commit()
+
+        async with db.execute(
+            """SELECT nama_lengkap, muse, umur, tanggal_lahir, status_sipil, gelar_tier, koin 
+               FROM users WHERE user_id = ?""",
+            (target_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+
+    nama, muse, umur, tgl, status_sipil, gelar, koin = row
+
+    ktp_card = (
+        "✅ <b>DATA KTP WARGA BERHASIL DIPERBARUI OLEH ADMIN!</b>\n\n"
+        "🪪 <b>KARTU TANDA PENDUKUK (KTP) DIGITAL</b>\n"
+        "🏛️ <b>KOTA COSA NOSTRA</b>\n"
+        "──────────────────────────────\n"
+        f"👤 <b>Nama Lengkap :</b> {nama}\n"
+        f"🎭 <b>Muse / Avatar :</b> {muse}\n"
+        f"🎂 <b>Umur         :</b> {umur} Tahun\n"
+        f"📅 <b>Tgl Lahir    :</b> {tgl}\n"
+        f"💍 <b>Status Sipil :</b> {status_sipil}\n"
+        f"💼 <b>Gelar / Profesi:</b> {gelar}\n"
+        "──────────────────────────────\n"
+        f"💳 <b>ID Citizen   :</b> <code>{target_id}</code>\n"
+        f"💰 <b>Koin Dompet  :</b> {koin:,} Koin"
+    )
+
+    await update.message.reply_text(ktp_card, parse_mode="HTML")
     return ConversationHandler.END
 
 # ==========================================
@@ -604,7 +723,7 @@ async def cmd_ktp(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(ktp_card, parse_mode="HTML")
 
 # ==========================================
-# FITUR: PENDAFTARAN NIKAH MANUAL (PILIHAN/DAFTAR NIKAH)
+# FITUR: PENDAFTARAN NIKAH MANUAL
 # ==========================================
 async def cmd_register_marriage(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -640,14 +759,12 @@ async def cmd_register_marriage(update: Update, context: ContextTypes.DEFAULT_TY
         now_epoch = int(time.time())
         cert_number, sha_hash, date_formatted = generate_marriage_certificate(user_id, target_id)
 
-        # Masukkan langsung ke database marriages
         await db.execute(
             """INSERT INTO marriages (cert_number, user_a_id, user_b_id, marriage_type, status, married_at, sha256_hash)
                VALUES (?, ?, ?, 'manual_register', 'active', ?, ?)""",
             (cert_number, user_id, target_id, now_epoch, sha_hash)
         )
 
-        # Update KTP Status Sipil kedua pengguna
         await db.execute("UPDATE users SET status_sipil = 'Menikah' WHERE user_id IN (?, ?)", (user_id, target_id))
         await db.commit()
 
@@ -922,7 +1039,6 @@ async def cmd_accept_proposal(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         await db.execute("UPDATE marriage_proposals SET status = 'accepted', responded_at = ? WHERE proposal_id = ?", (now_epoch, proposal_id))
         
-        # Auto Update Status Sipil KTP jadi 'Menikah'
         await db.execute("UPDATE users SET status_sipil = 'Menikah' WHERE user_id IN (?, ?)", (user_id, proposer_id))
         await db.commit()
 
@@ -1017,7 +1133,6 @@ async def cmd_divorce(update: Update, context: ContextTypes.DEFAULT_TYPE):
             (now_epoch, marriage_id)
         )
         
-        # Reset Status KTP Kembali ke Lajang
         await db.execute("UPDATE users SET status_sipil = 'Lajang' WHERE user_id IN (?, ?)", (user_a, user_b))
 
         split_msg = ""
@@ -2002,16 +2117,64 @@ async def cmd_lineage_admin_panel(update: Update, context: ContextTypes.DEFAULT_
             f"🛠️ <b>LINEAGE ADMIN PANEL</b>\n\n"
             f"Level Otoritas Anda: <b>Tier {tier}</b>\n\n"
             f"<b>Fitur Admin:</b>\n"
+            f"• <code>/edit_ktp [user_id]</code> — Edit KTP warga (Tier 1+)\n"
+            f"• <code>/rename_family [family_id] [nama_baru]</code> — Ubah nama keluarga (Tier 2+)\n"
             f"• <code>/lock_family [family_id] [alasan]</code> (Tier 2+)\n"
             f"• <code>/unlock_family [family_id]</code> (Tier 2+)\n"
             f"• <code>/force_divorce [user_id]</code> (Tier 2+)\n\n"
-            f"<b>Aksi Berat (butuh 2 admin berbeda):</b>\n"
+            f"<b>Aksi Berat:</b>\n"
             f"• <code>/excommunicate [user_id] [alasan]</code> — submit request (Tier 3+)\n"
-            f"• <code>/approve_action [action_id]</code> — approve & eksekusi (Tier 3+, admin BEDA dari requester)\n\n"
+            f"• <code>/approve_action [action_id]</code> — approve & eksekusi (Tier 3+)\n\n"
             f"<b>Cheat:</b>\n"
             f"• <code>/cheat_set_loyalty [user_id] [score]</code> (Tier 1+)"
         )
         await update.message.reply_text(text, parse_mode="HTML")
+
+async def cmd_rename_family(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if len(context.args) < 2 or not context.args[0].isdigit():
+        return await update.message.reply_text(
+            "🛠️ <b>FORMAT RENAME FAMILY (ADMIN):</b>\n\n"
+            "Gunakan: <code>/rename_family [family_id] [nama_keluarga_baru]</code>\n"
+            "Contoh: <code>/rename_family 1 Casa Corleone</code>",
+            parse_mode="HTML"
+        )
+
+    family_id = int(context.args[0])
+    new_family_name = " ".join(context.args[1:]).strip()
+
+    if not (3 <= len(new_family_name) <= 40):
+        return await update.message.reply_text("❌ Nama keluarga baru harus 3-40 karakter.")
+
+    if new_family_name.upper() in BLACKLISTED_FAMILY_NAMES:
+        return await update.message.reply_text("🚫 Nama keluarga ini terlarang/reserved system.")
+
+    async with get_db_connection() as db:
+        await ensure_all_tables_exist(db)
+        if await check_admin_tier(db, user_id) < 2:
+            return await update.message.reply_text("🚫 Butuh akses Admin Tier 2+.")
+
+        async with db.execute("SELECT family_name FROM families WHERE family_id = ?", (family_id,)) as cursor:
+            fam = await cursor.fetchone()
+
+        if not fam:
+            return await update.message.reply_text(f"❌ Family ID <code>{family_id}</code> tidak ditemukan.", parse_mode="HTML")
+
+        old_name = fam[0]
+
+        try:
+            await db.execute("UPDATE families SET family_name = ? WHERE family_id = ?", (new_family_name, family_id))
+            await db.commit()
+        except aiosqlite.IntegrityError:
+            return await update.message.reply_text("❌ Nama keluarga tersebut sudah digunakan oleh keluarga lain.")
+
+        await update.message.reply_text(
+            f"✅ <b>NAMA KELUARGA BERHASIL DIUBAH!</b>\n\n"
+            f"🏛️ Family ID: <code>{family_id}</code>\n"
+            f"📉 Nama Lama: <s>{old_name}</s>\n"
+            f"📈 Nama Baru: <b>{new_family_name}</b>",
+            parse_mode="HTML"
+        )
 
 async def cmd_lock_family(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -2167,92 +2330,143 @@ async def cmd_cheat_set_loyalty(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text(f"🧪 <b>CHEAT:</b> Loyalty <code>{target_id}</code> diset ke <b>{score}</b>.", parse_mode="HTML")
 
 # ==========================================
-# SUB-MENU SYSTEM (KATEGORISASI FITUR)
+# SYSTEM SUB-MENU INTERAKTIF (INLINE KEYBOARD)
 # ==========================================
+def get_main_menu_keyboard():
+    keyboard = [
+        [
+            InlineKeyboardButton("📝 Utilitas & KTP", callback_data="menu_utilitas"),
+            InlineKeyboardButton("💍 Pernikahan", callback_data="menu_nikah")
+        ],
+        [
+            InlineKeyboardButton("🏛️ Keluarga", callback_data="menu_keluarga"),
+            InlineKeyboardButton("⚰️ Warisan & Pensiun", callback_data="menu_warisan")
+        ],
+        [
+            InlineKeyboardButton("🛠️ Admin Panel", callback_data="menu_admin")
+        ]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+def get_back_button():
+    return InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Kembali ke Menu Utama", callback_data="menu_main")]])
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         "💁‍♀️ <b>HALO KAK! SELAMAT DATANG DI COSA NOSTRA LINEAGE BOT!</b>\n\n"
-        "Biar nggak numpuk dan kepanjangan, menu layanan udah Resepsionis bagi jadi beberapa kategori ya Kak! 😉✨\n\n"
-        "<b>PILIH KATEGORI LAYANAN:</b>\n"
-        "📝 <b>/menu_utilitas</b> — Pendaftaran KTP, klaim harian, ID & silsilah\n"
-        "💍 <b>/menu_nikah</b> — Pernikahan, lamaran, anniversary & perceraian\n"
-        "🏛️ <b>/menu_keluarga</b> — Pembuatan keluarga, anggota, anak & kas vault\n"
-        "⚰️ <b>/menu_warisan</b> — Surat wasiat, ahli waris & eksekusi pensiun\n"
-        "🛠️ <b>/lineage_admin_panel</b> — Panel kontrol khusus Administrator\n\n"
-        "<i>Klik salah satu perintah di atas untuk membuka daftar fiturnya ya!</i>"
+        "Silakan pilih kategori layanan yang ingin Kakak akses lewat tombol interaktif di bawah ini ya! 😉✨"
     )
-    await update.message.reply_text(text, parse_mode="HTML")
+    if update.callback_query:
+        query = update.callback_query
+        await query.answer()
+        await query.edit_message_text(text, reply_markup=get_main_menu_keyboard(), parse_mode="HTML")
+    else:
+        await update.message.reply_text(text, reply_markup=get_main_menu_keyboard(), parse_mode="HTML")
 
-async def menu_utilitas(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = (
-        "📝 <b>SUB-MENU PENDAFTARAN & UTILITAS</b>\n\n"
-        "• <code>/register</code> — Daftar KTP Citizen baru\n"
-        "• <code>/ktp [user_id]</code> — Cek Kartu Identitas KTP Digital\n"
-        "• <code>/daily</code> — Klaim bonus koin harian gratis\n"
-        "• <code>/my_id</code> — Cek ID Telegram Kakak\n"
-        "• <code>/tree [user_id]</code> — Cek diagram visual pohon silsilah keluarga\n\n"
-        "👈 <i>Ketik /start untuk kembali ke menu utama.</i>"
-    )
-    await update.message.reply_text(text, parse_mode="HTML")
+async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
 
-async def menu_nikah(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = (
-        "💍 <b>SUB-MENU LAYANAN PERNIKAHAN</b>\n\n"
-        "• <code>/propose [user_id] [conventional|modern|secret]</code> — Lamar doi\n"
-        "• <code>/accept_proposal [user_id]</code> — Terima lamaran\n"
-        "• <code>/reject_proposal [user_id]</code> — Tolak lamaran\n"
-        "• <code>/register_marriage [user_id]</code> — Daftar nikah manual (pasangan RP)\n"
-        "• <code>/proposals_list</code> — Cek daftar lamaran pending\n"
-        "• <code>/marriage_status</code> — Cek status pernikahan aktif\n"
-        "• <code>/anniversary</code> — Cek usia & milestone hubungan\n"
-        "• <code>/renew_vows</code> — Pembaharuan janji suci nikah\n"
-        "• <code>/divorce [split]</code> — Cerai (opsi split harta gono-gini)\n"
-        "• <code>/marriage_history</code> — Lihat riwayat mantan/pernikahan lalu\n\n"
-        "👈 <i>Ketik /start untuk kembali ke menu utama.</i>"
-    )
-    await update.message.reply_text(text, parse_mode="HTML")
+    if data == "menu_main":
+        await start(update, context)
 
-async def menu_keluarga(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = (
-        "🏛️ <b>SUB-MENU LAYANAN KELUARGA</b>\n\n"
-        "<b>Manajemen Dasar:</b>\n"
-        "• <code>/create_family [nama]</code> — Dirikan keluarga baru\n"
-        "• <code>/family</code> — Cek info keluarga aktif\n"
-        "• <code>/leave_family</code> — Keluar sukarela dari keluarga\n"
-        "• <code>/betray</code> — Khianati keluarga (loyalty reset 0)\n"
-        "• <code>/loyalty_check [user_id]</code> — Cek skor loyalitas anggota\n"
-        "• <code>/family_history</code> — Lihat riwayat keluar-masuk keluarga\n\n"
-        "<b>Relasi & Anggota:</b>\n"
-        "• <code>/add_kandung [user_id]</code> — Tambah anak kandung\n"
-        "• <code>/add_adopt [user_id]</code> — Tambah anak angkat\n"
-        "• <code>/disown [user_id]</code> — Hapus anak dari keluarga\n"
-        "• <code>/add_sibling [user_id]</code> — Tambah saudara\n"
-        "• <code>/siblings [user_id]</code> — Lihat daftar saudara\n"
-        "• <code>/godparent [user_id]</code> — Tunjuk godparent\n"
-        "• <code>/revoke_godparent [user_id]</code> — Cabut status godparent\n"
-        "• <code>/my_godchildren</code> — Lihat daftar godchildren\n"
-        "• <code>/in_laws</code> — Lihat keluarga pasangan (mertua/ipar)\n\n"
-        "<b>Kas & Kekuasaan (Head):</b>\n"
-        "• <code>/deposit_vault [jumlah]</code> — Setor koin ke kas keluarga\n"
-        "• <code>/withdraw_vault [jumlah]</code> — Tarik koin dari kas keluarga (Head)\n"
-        "• <code>/set_family_tax [0-100]</code> — Atur pajak keluarga (Head)\n"
-        "• <code>/transfer_head [user_id]</code> — Transfer kepemimpinan keluarga\n"
-        "• <code>/kick_member [user_id]</code> — Keluarkan anggota (Head)\n\n"
-        "👈 <i>Ketik /start untuk kembali ke menu utama.</i>"
-    )
-    await update.message.reply_text(text, parse_mode="HTML")
+    elif data == "menu_utilitas":
+        text = (
+            "📝 <b>SUB-MENU PENDAFTARAN & UTILITAS</b>\n\n"
+            "• <code>/register</code> — Daftar KTP Citizen baru\n"
+            "• <code>/ktp [user_id]</code> — Cek Kartu Identitas KTP Digital\n"
+            "• <code>/daily</code> — Klaim bonus koin harian gratis\n"
+            "• <code>/my_id</code> — Cek ID Telegram Kakak\n"
+            "• <code>/tree [user_id]</code> — Cek diagram visual pohon silsilah keluarga\n\n"
+            "⚠️ <i>Jika salah mengisi data saat daftar KTP, hubungi Admin ya!</i>"
+        )
+        await query.edit_message_text(text, reply_markup=get_back_button(), parse_mode="HTML")
 
-async def menu_warisan(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = (
-        "⚰️ <b>SUB-MENU LAYANAN WARISAN & PENSIUN</b>\n\n"
-        "• <code>/will [id:persen ...]</code> — Atur pembagian surat wasiat\n"
-        "• <code>/appoint_heir [user_id]</code> — Tunjuk ahli waris tunggal (100%)\n"
-        "• <code>/will_status</code> — Cek isi surat wasiat\n"
-        "• <code>/cancel_will</code> — Batalkan surat wasiat\n"
-        "• <code>/retire</code> — Eksekusi wasiat & bagi harta ke ahli waris\n\n"
-        "👈 <i>Ketik /start untuk kembali ke menu utama.</i>"
-    )
-    await update.message.reply_text(text, parse_mode="HTML")
+    elif data == "menu_nikah":
+        text = (
+            "💍 <b>SUB-MENU LAYANAN PERNIKAHAN</b>\n\n"
+            "• <code>/propose [user_id] [tipe]</code> — Lamar doi\n"
+            "• <code>/accept_proposal [user_id]</code> — Terima lamaran\n"
+            "• <code>/reject_proposal [user_id]</code> — Tolak lamaran\n"
+            "• <code>/register_marriage [user_id]</code> — Daftar nikah manual (pasangan RP)\n"
+            "• <code>/proposals_list</code> — Cek daftar lamaran pending\n"
+            "• <code>/marriage_status</code> — Cek status pernikahan aktif\n"
+            "• <code>/anniversary</code> — Cek usia & milestone hubungan\n"
+            "• <code>/renew_vows</code> — Pembaharuan janji suci nikah\n"
+            "• <code>/divorce [split]</code> — Cerai (opsi split harta gono-gini)\n"
+            "• <code>/marriage_history</code> — Lihat riwayat mantan/pernikahan lalu"
+        )
+        await query.edit_message_text(text, reply_markup=get_back_button(), parse_mode="HTML")
+
+    elif data == "menu_keluarga":
+        text = (
+            "🏛️ <b>SUB-MENU LAYANAN KELUARGA</b>\n\n"
+            "<b>Manajemen Dasar:</b>\n"
+            "• <code>/create_family [nama]</code> — Dirikan keluarga baru\n"
+            "• <code>/family</code> — Cek info keluarga aktif\n"
+            "• <code>/leave_family</code> — Keluar sukarela dari keluarga\n"
+            "• <code>/betray</code> — Khianati keluarga (loyalty reset 0)\n"
+            "• <code>/loyalty_check [user_id]</code> — Cek skor loyalitas anggota\n"
+            "• <code>/family_history</code> — Lihat riwayat keluar-masuk keluarga\n\n"
+            "<b>Relasi & Anggota:</b>\n"
+            "• <code>/add_kandung [user_id]</code> — Tambah anak kandung\n"
+            "• <code>/add_adopt [user_id]</code> — Tambah anak angkat\n"
+            "• <code>/disown [user_id]</code> — Hapus anak dari keluarga\n"
+            "• <code>/add_sibling [user_id]</code> — Tambah saudara\n"
+            "• <code>/siblings [user_id]</code> — Lihat daftar saudara\n"
+            "• <code>/godparent [user_id]</code> — Tunjuk godparent\n"
+            "• <code>/revoke_godparent [user_id]</code> — Cabut status godparent\n"
+            "• <code>/my_godchildren</code> — Lihat daftar godchildren\n"
+            "• <code>/in_laws</code> — Lihat keluarga pasangan (mertua/ipar)\n\n"
+            "<b>Kas & Kekuasaan (Head):</b>\n"
+            "• <code>/deposit_vault [jumlah]</code> — Setor koin ke kas keluarga\n"
+            "• <code>/withdraw_vault [jumlah]</code> — Tarik koin dari kas keluarga (Head)\n"
+            "• <code>/set_family_tax [0-100]</code> — Atur pajak keluarga (Head)\n"
+            "• <code>/transfer_head [user_id]</code> — Transfer kepemimpinan keluarga\n"
+            "• <code>/kick_member [user_id]</code> — Keluarkan anggota (Head)"
+        )
+        await query.edit_message_text(text, reply_markup=get_back_button(), parse_mode="HTML")
+
+    elif data == "menu_warisan":
+        text = (
+            "⚰️ <b>SUB-MENU LAYANAN WARISAN & PENSIUN</b>\n\n"
+            "• <code>/will [id:persen ...]</code> — Atur pembagian surat wasiat\n"
+            "• <code>/appoint_heir [user_id]</code> — Tunjuk ahli waris tunggal (100%)\n"
+            "• <code>/will_status</code> — Cek isi surat wasiat\n"
+            "• <code>/cancel_will</code> — Batalkan surat wasiat\n"
+            "• <code>/retire</code> — Eksekusi wasiat & bagi harta ke ahli waris"
+        )
+        await query.edit_message_text(text, reply_markup=get_back_button(), parse_mode="HTML")
+
+    elif data == "menu_admin":
+        user_id = update.effective_user.id
+        async with get_db_connection() as db:
+            await ensure_all_tables_exist(db)
+            tier = await check_admin_tier(db, user_id)
+            if tier == 0:
+                return await query.edit_message_text(
+                    "🚫 <b>AKSES DITOLAK:</b> Anda tidak memiliki otoritas Administrator.",
+                    reply_markup=get_back_button(),
+                    parse_mode="HTML"
+                )
+
+            text = (
+                f"🛠️ <b>LINEAGE ADMIN PANEL</b>\n\n"
+                f"Level Otoritas Anda: <b>Tier {tier}</b>\n\n"
+                f"<b>Fitur Admin:</b>\n"
+                f"• <code>/edit_ktp [user_id]</code> (Tier 1+)\n"
+                f"• <code>/rename_family [family_id] [nama_baru]</code> (Tier 2+)\n"
+                f"• <code>/lock_family [family_id] [alasan]</code> (Tier 2+)\n"
+                f"• <code>/unlock_family [family_id]</code> (Tier 2+)\n"
+                f"• <code>/force_divorce [user_id]</code> (Tier 2+)\n\n"
+                f"<b>Aksi Berat:</b>\n"
+                f"• <code>/excommunicate [user_id] [alasan]</code>\n"
+                f"• <code>/approve_action [action_id]</code>\n\n"
+                f"<b>Cheat:</b>\n"
+                f"• <code>/cheat_set_loyalty [user_id] [score]</code>"
+            )
+            await query.edit_message_text(text, reply_markup=get_back_button(), parse_mode="HTML")
 
 # ==========================================
 # MAIN FUNCTION
@@ -2262,7 +2476,7 @@ def build_app():
 
     app.add_error_handler(global_error_handler)
 
-    # Conversation Handler Pendaftaran KTP Interactive
+    # Conversation Handler Pendaftaran KTP
     reg_conv = ConversationHandler(
         entry_points=[CommandHandler("register", reg_start)],
         states={
@@ -2275,12 +2489,20 @@ def build_app():
     )
     app.add_handler(reg_conv)
 
-    # Menu Utama & Sub-Menu
+    # Conversation Handler Edit KTP (Admin Only)
+    admin_edit_conv = ConversationHandler(
+        entry_points=[CommandHandler("edit_ktp", edit_ktp_admin_start)],
+        states={
+            ADMIN_EDIT_CHOICE: [CallbackQueryHandler(edit_ktp_admin_choice, pattern="^(admin_edit_)")],
+            ADMIN_EDIT_VALUE: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_ktp_admin_value)]
+        },
+        fallbacks=[CommandHandler("cancel", reg_cancel)]
+    )
+    app.add_handler(admin_edit_conv)
+
+    # Navigation Menu Utama & Sub-Menu Callback
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("menu_utilitas", menu_utilitas))
-    app.add_handler(CommandHandler("menu_nikah", menu_nikah))
-    app.add_handler(CommandHandler("menu_keluarga", menu_keluarga))
-    app.add_handler(CommandHandler("menu_warisan", menu_warisan))
+    app.add_handler(CallbackQueryHandler(menu_callback_handler, pattern="^menu_"))
 
     # Registration & Utility
     app.add_handler(CommandHandler("ktp", cmd_ktp))
@@ -2331,6 +2553,7 @@ def build_app():
 
     # Admin
     app.add_handler(CommandHandler("lineage_admin_panel", cmd_lineage_admin_panel))
+    app.add_handler(CommandHandler("rename_family", cmd_rename_family))
     app.add_handler(CommandHandler("lock_family", cmd_lock_family))
     app.add_handler(CommandHandler("unlock_family", cmd_unlock_family))
     app.add_handler(CommandHandler("force_divorce", cmd_force_divorce))
