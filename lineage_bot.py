@@ -409,7 +409,7 @@ async def cmd_register(update: Update, context: ContextTypes.DEFAULT_TYPE):
     async with get_db_connection() as db:
         if await user_exists(db, user_id):
             return await update.message.reply_text(
-                f"💁‍♀️ <b>Eits, Kakak Udah Terdaftar Kok!</b>\n\n"
+                f"f💁‍♀️ <b>Eits, Kakak Udah Terdaftar Kok!</b>\n\n"
                 f"ID Kakak (<code>{user_id}</code>) udah dicatat di buku tamu Cosa Nostra. "
                 f"Langsung aja cari pasangan atau gabung keluarga pakai perintah <code>/start</code>!",
                 parse_mode="HTML"
