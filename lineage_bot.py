@@ -409,7 +409,7 @@ async def cmd_register(update: Update, context: ContextTypes.DEFAULT_TYPE):
     async with get_db_connection() as db:
         if await user_exists(db, user_id):
             return await update.message.reply_text(
-                f"f💁‍♀️ <b>Eits, Kakak Udah Terdaftar Kok!</b>\n\n"
+                f"💁‍♀️ <b>Eits, Kakak Udah Terdaftar Kok!</b>\n\n"
                 f"ID Kakak (<code>{user_id}</code>) udah dicatat di buku tamu Cosa Nostra. "
                 f"Langsung aja cari pasangan atau gabung keluarga pakai perintah <code>/start</code>!",
                 parse_mode="HTML"
@@ -619,7 +619,7 @@ async def cmd_accept_proposal(update: Update, context: ContextTypes.DEFAULT_TYPE
     user_id = update.effective_user.id
     proposer_id = parse_target_id(context)
     if proposer_id is None:
-        return await update.message.reply_text("💁‍♀️ Formatnya: <code>/accept_proposal [proposer_id]</code> ya Kak!", parse_mode="HTML")
+        return await update.message.reply_text("💁‍♀️ Format: <code>/accept_proposal [proposer_id]</code> ya Kak!", parse_mode="HTML")
 
     async with get_db_connection() as db:
         if not await ensure_user_registered(update, db, user_id):
@@ -677,7 +677,7 @@ async def cmd_reject_proposal(update: Update, context: ContextTypes.DEFAULT_TYPE
     user_id = update.effective_user.id
     proposer_id = parse_target_id(context)
     if proposer_id is None:
-        return await update.message.reply_text("💁‍♀️ Formatnya: <code>/reject_proposal [proposer_id]</code> ya Kak!", parse_mode="HTML")
+        return await update.message.reply_text("💁‍♀️ Format: <code>/reject_proposal [proposer_id]</code> ya Kak!", parse_mode="HTML")
 
     async with get_db_connection() as db:
         if not await ensure_user_registered(update, db, user_id):
