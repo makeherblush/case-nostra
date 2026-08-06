@@ -33,7 +33,6 @@ TOKEN = os.getenv("TELEGRAM_WEDDING_BOT_TOKEN")
 if not TOKEN:
     raise ValueError("TELEGRAM_WEDDING_BOT_TOKEN belum diset di Variables Railway!")
 
-# Channel Resmi Sesuai Permintaan
 CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID", "@RoyalWeddingRP")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -41,10 +40,8 @@ DB_DIR = os.getenv("RAILWAY_VOLUME_MOUNT_PATH", BASE_DIR)
 DB_NAME = os.path.join(DB_DIR, "wedding_event.db")
 WIB = timezone(timedelta(hours=7))  # UTC+7
 
-# ID Owner Permanen (Otomatis Tier 4 / Full Control)
 MY_PERMANENT_OWNER_ID = 8396793986  
 
-# Pricing Paket Mapping
 PAKET_PRICING = {
     "silver": 500000,
     "gold": 1200000,
@@ -69,7 +66,6 @@ async def get_db_connection():
 # ==========================================
 async def init_wedding_db():
     async with get_db_connection() as db:
-        # Tabel Users, Koin & Tier Admin
         await db.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 user_id INTEGER PRIMARY KEY,
@@ -90,7 +86,6 @@ async def init_wedding_db():
             except Exception:
                 pass
         
-        # Tabel Events (Lengkap Data Diri & Paket Otomatis)
         await db.execute("""
             CREATE TABLE IF NOT EXISTS events (
                 event_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -116,7 +111,6 @@ async def init_wedding_db():
             )
         """)
 
-        # Tabel RSVP Tamu
         await db.execute("""
             CREATE TABLE IF NOT EXISTS rsvp (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -129,7 +123,6 @@ async def init_wedding_db():
             )
         """)
 
-        # Tabel Angpao Digital
         await db.execute("""
             CREATE TABLE IF NOT EXISTS angpao (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -142,7 +135,6 @@ async def init_wedding_db():
             )
         """)
 
-        # Tabel Klaim Hadiah / Doorprize / Angpao ke Admin
         await db.execute("""
             CREATE TABLE IF NOT EXISTS claims (
                 claim_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -155,7 +147,6 @@ async def init_wedding_db():
             )
         """)
 
-        # Tabel Request Lagu
         await db.execute("""
             CREATE TABLE IF NOT EXISTS song_requests (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -167,7 +158,6 @@ async def init_wedding_db():
             )
         """)
 
-        # Tabel Galeri Photo Booth
         await db.execute("""
             CREATE TABLE IF NOT EXISTS photo_gallery (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -288,7 +278,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "menu_main":
         await start(update, context)
 
-    # --- 1. PAKET & HARGA ---
     elif data == "menu_paket":
         text = "📋 <b>KATALOG PAKET & PRICING EVENT</b>\n\nPilih jenis paket untuk melihat rincian fasilitas & biaya otomatis:"
         keyboard = [
@@ -325,10 +314,10 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "<b>Fasilitas Termasuk:</b>\n"
             "• Venue Kapasitas 250 Tamu\n"
             "• Catering Prasmanan 5 menu utama + 2 snack corner\n"
-            "• Dekorasi tema custom (Pilihan dari 5 tema)\n"
+            "• Dekorasi tema custom\n"
             "• MC + Band Akustik\n"
             "• Dokumentasi Foto + Video (SDE)\n"
-            "• MUA + Busana Pengantin Pria & Wanita"
+            "• MUA + Busana Pengantin"
         )
         keyboard = [[InlineKeyboardButton("◀️ Kembali ke Paket", callback_data="menu_paket")]]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
@@ -366,7 +355,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [[InlineKeyboardButton("◀️ Kembali ke Paket", callback_data="menu_paket")]]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
-    # --- 2. BUAT EVENT ---
     elif data == "menu_buat_event":
         text = "🎉 <b>PERENCANAAN & PEMBUATAN EVENT</b>\n\nPilih langkah operasional pembuatan acara:"
         keyboard = [
@@ -442,12 +430,10 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [[InlineKeyboardButton("◀️ Kembali", callback_data="menu_buat_event")]]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
-    # --- 3. VENDOR & ROLE ---
     elif data == "menu_vendor":
         text = "🧑‍🤝‍🧑 <b>DIREKTORI VENDOR & OPERASIONAL ROLE</b>\n\nPilih kategori vendor untuk interaksi RP:"
         keyboard = [
             [InlineKeyboardButton("🎤 MC", callback_data="ven_mc"), InlineKeyboardButton("🍽️ Catering", callback_data="ven_catering")],
-            [InlineKeyboardButton("🥤 Minuman", callback_data="ven_minuman"), InlineKeyboardButton("🎋 Dekorasi", callback_data="ven_dekor")],
             [btn_back()]
         ]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
@@ -469,7 +455,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [[InlineKeyboardButton("◀️ Kembali", callback_data="menu_vendor")]]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
-    # --- 4. ANGPAO & KLAIM ---
     elif data == "menu_angpao":
         text = (
             "🎁 <b>ANGPAO & KLAIM HADIAH DOORPRIZE</b>\n\n"
@@ -482,7 +467,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [[btn_back()]]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
-    # --- 5. MUSIC REQUEST ---
     elif data == "menu_musik":
         text = (
             "🎵 <b>REQUEST LAGU KE BAND PESTA</b>\n\n"
@@ -492,7 +476,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [[btn_back()]]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
-    # --- 6. PHOTOBOOTH ---
     elif data == "menu_photobooth":
         text = (
             "📸 <b>DIGITAL PHOTO BOOTH & GALLERY</b>\n\n"
@@ -502,7 +485,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [[btn_back()]]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
-    # --- 7. LAYANAN GRUP ---
     elif data == "menu_layanan":
         text = (
             "🍽️ <b>LAYANAN MAKANAN & MINUMAN DI GRUP</b>\n\n"
@@ -519,7 +501,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ])
         await query.edit_message_text(text, reply_markup=rsvp_markup, parse_mode="HTML")
 
-    # --- 8. TAMU & RSVP ---
     elif data == "menu_rsvp":
         async with get_db_connection() as db:
             async with db.execute("SELECT username, status_rsvp, meja FROM rsvp WHERE event_id = 1") as cursor:
@@ -557,13 +538,11 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML"
         )
 
-    # --- 9. RUNDOWN ---
     elif data == "menu_rundown":
         text = "⏱️ <b>RUNDOWN:</b> Persiapan ➔ Akad ➔ <b>[Resepsi]</b> ➔ Hiburan ➔ Selesai"
         keyboard = [[btn_back()]]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
-    # --- 10. KOIN & TRANSAKSI ---
     elif data == "menu_koin":
         async with get_db_connection() as db:
             async with db.execute("SELECT koin FROM users WHERE user_id = ?", (user_id,)) as cursor:
@@ -579,13 +558,11 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [[btn_back()]]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
-    # --- 11. LAPORAN ---
     elif data == "menu_laporan":
         text = "📊 <b>LAPORAN EVENT:</b> Berjalan sukses dengan rating ⭐⭐⭐⭐⭐ (5.0/5.0)."
         keyboard = [[btn_back()]]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
-    # --- 12. ADMIN PANEL ---
     elif data == "menu_admin":
         async with get_db_connection() as db:
             tier = await check_admin_tier(db, user_id)
@@ -604,15 +581,34 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [[btn_back()]]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
-    # --- 13. BANTUAN ---
     elif data == "menu_bantuan":
         text = "❓ <b>BANTUAN:</b> Gunakan tombol interaktif atau command untuk mengontrol simulasi pernikahan di @RoyalWeddingRP."
         keyboard = [[btn_back()]]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
 # ==========================================
-# FITUR KLAIM HADIAH, ANGPAO & ADMIN VERIFIKASI
+# COMMANDS RSVP & LAINNYA
 # ==========================================
+async def cmd_rsvp(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    username = update.effective_user.username or update.effective_user.first_name
+    
+    if not context.args:
+        return await update.message.reply_text("Format: <code>/rsvp [hadir|tidak]</code>", parse_mode="HTML")
+
+    st = context.args[0].lower()
+    if st not in ("hadir", "tidak", "mungkin"):
+        return await update.message.reply_text("❌ Status RSVP hanya: `hadir`, `tidak`, `mungkin`.", parse_mode="HTML")
+
+    async with get_db_connection() as db:
+        await db.execute(
+            "INSERT INTO rsvp (event_id, user_id, username, status_rsvp) VALUES (1, ?, ?, ?)",
+            (user_id, username, st)
+        )
+        await db.commit()
+
+    await update.message.reply_text(f"💌 Konfirmasi RSVP dari @{username} tercatat: <b>{st.upper()}</b>.", parse_mode="HTML")
+
 async def cmd_klaim_doorprize(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     username = update.effective_user.username or update.effective_user.first_name
@@ -630,7 +626,7 @@ async def cmd_klaim_doorprize(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         await db.commit()
 
-    await update.message.reply_text(f"📝 Permintaan klaim Doorprize senilai <b>{nominal:,} Koin</b> telah dikirim ke Admin untuk diverifikasi.", parse_mode="HTML")
+    await update.message.reply_text(f"📝 Permintaan klaim Doorprize senilai <b>{nominal:,} Koin</b> telah dikirim ke Admin.", parse_mode="HTML")
     await send_to_channel(context, f"🔔 <b>KLAIM DOORPRIZE BARU</b>\n👤 @{username} mengajukan klaim doorprize senilai <b>{nominal:,} Koin</b>.")
 
 async def cmd_klaim_angpao(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -695,15 +691,12 @@ async def cmd_verifikasi_klaim(update: Update, context: ContextTypes.DEFAULT_TYP
             await db.execute("UPDATE claims SET status = 'Approved' WHERE claim_id = ?", (cid,))
             await db.execute("INSERT INTO users (user_id, koin) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET koin=koin+?", (t_id, nom, nom))
             await db.commit()
-            await update.message.reply_text(f"✅ Klaim #{cid} disetujui. Saldo <b>{nom:,} Koin</b> telah ditambahkan ke user.")
+            await update.message.reply_text(f"✅ Klaim #{cid} disetujui. Saldo <b>{nom:,} Koin</b> ditambahkan ke user.")
         else:
             await db.execute("UPDATE claims SET status = 'Rejected' WHERE claim_id = ?", (cid,))
             await db.commit()
             await update.message.reply_text(f"❌ Klaim #{cid} ditolak.")
 
-# ==========================================
-# COMMANDS LAINNYA
-# ==========================================
 async def cmd_buat_event(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     raw_text = " ".join(context.args)
@@ -966,8 +959,6 @@ def build_app():
 
     app.add_handler(CommandHandler("buat_event", cmd_buat_event))
     app.add_handler(CommandHandler("bayar_event", cmd_bayar_event))
-    app.add_handler(CommandHandler("pilih_vendor", lambda u, c: u.message.reply_text("Gunakan /buat_event dengan paket yang sesuai.")))
-    app.add_handler(CommandHandler("atur_meja", lambda u, c: u.message.reply_text("Fitur diatur melalui menu utama.")))
     app.add_handler(CommandHandler("rsvp", cmd_rsvp))
 
     app.add_handler(CommandHandler("minta_makan", cmd_minta_makan))
