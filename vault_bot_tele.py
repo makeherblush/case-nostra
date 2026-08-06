@@ -21,9 +21,14 @@ TOKEN = os.getenv("TELEGRAM_VAULT_BOT_TOKEN")
 if not TOKEN:
     raise ValueError("TELEGRAM_VAULT_BOT_TOKEN belum diset di Variables Railway!")
 
-# Path Absolut agar membaca file fisik database yang sama persis
+# Path Absolut agar membaca file fisik database yang sama persis.
+# Kalau Railway Volume ter-attach ke service ini, RAILWAY_VOLUME_MOUNT_PATH
+# otomatis di-set oleh Railway -> database disimpan di sana (persist antar
+# redeploy, tidak ke-reset tiap kali push update). Kalau belum ada volume
+# (misal saat development lokal), fallback ke folder file ini sendiri.
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_NAME = os.path.join(BASE_DIR, "cosa_nostra.db")
+DB_DIR = os.getenv("RAILWAY_VOLUME_MOUNT_PATH", BASE_DIR)
+DB_NAME = os.path.join(DB_DIR, "cosa_nostra.db")
 WIB = timezone(timedelta(hours=7))
 
 # ==========================================
