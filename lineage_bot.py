@@ -1248,7 +1248,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/retire — Eksekusi wasiat\n\n"
         "🛠️ ADMINISTRATOR: /lineage_admin_panel"
     )
-    await update.message.reply_text(text, parse_mode="Markdown")
+    await update.message.reply_text(text, parse_mode="HTML")
 
 # ==========================================
 # MAIN FUNCTION
