@@ -38,6 +38,17 @@ WIB = timezone(timedelta(hours=7))
 
 MY_PERMANENT_OWNER_ID = 8396793986
 
+# Threshold pencapaian ke rank berikutnya (Rank 1 - 6)
+RANK_THRESHOLDS = [5, 15, 30, 50, 80, 120]
+
+RANK_TITLES = {
+    "police": ["Cadet", "Officer", "Detective", "Sergeant", "Lieutenant", "Captain", "Commissioner"],
+    "lawyer": ["Paralegal", "Junior Attorney", "Associate", "Senior Partner", "Managing Partner", "Defense Elite", "Legal Titan"],
+    "judge": ["Clerk", "Magistrate", "District Judge", "Circuit Judge", "Appellate Judge", "Supreme Justice", "Chief Justice"],
+    "politician": ["Intern", "Campaign Staff", "City Councilor", "State Representative", "Senator", "Governor", "President"],
+    "journalist": ["Cub Reporter", "Staff Writer", "Investigative Reporter", "Senior Editor", "Managing Editor", "Bureau Chief", "Media Mogul"]
+}
+
 # ==========================================
 # HELPER KONEKSI DATABASE (WAL MODE & AUTO TABLE CREATION)
 # ==========================================
@@ -76,9 +87,32 @@ async def init_db():
                 last_daily INTEGER DEFAULT 0,
                 job_active TEXT,
                 job_finish_time INTEGER DEFAULT 0,
-                last_business_collect INTEGER DEFAULT 0
+                last_business_collect INTEGER DEFAULT 0,
+                career_track TEXT DEFAULT 'mafia',
+                career_rank INTEGER DEFAULT 0,
+                arrest_count INTEGER DEFAULT 0,
+                bail_count INTEGER DEFAULT 0,
+                pardon_count INTEGER DEFAULT 0,
+                expose_count INTEGER DEFAULT 0,
+                amnesty_count INTEGER DEFAULT 0
             )
         """)
+
+        columns = [
+            ("career_track", "TEXT DEFAULT 'mafia'"),
+            ("career_rank", "INTEGER DEFAULT 0"),
+            ("arrest_count", "INTEGER DEFAULT 0"),
+            ("bail_count", "INTEGER DEFAULT 0"),
+            ("pardon_count", "INTEGER DEFAULT 0"),
+            ("expose_count", "INTEGER DEFAULT 0"),
+            ("amnesty_count", "INTEGER DEFAULT 0")
+        ]
+        for col_name, col_type in columns:
+            try:
+                await db.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_type};")
+            except Exception:
+                pass
+
         await db.execute("""
             CREATE TABLE IF NOT EXISTS inventory (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -132,7 +166,32 @@ async def global_error_handler(update: object, context: ContextTypes.DEFAULT_TYP
 # ==========================================
 # DATABASE HELPER & USER MANAGEMENT
 # ==========================================
-USER_COLUMNS = "user_id, username, koin, bank_balance, bank_loan, vitality, gelar_tier, heat, respect, admin_tier, jailed_until, bounty, crew_id, last_work, last_daily, job_active, job_finish_time, last_business_collect"
+USER_COLUMNS = "user_id, username, koin, bank_balance, bank_loan, vitality, gelar_tier, heat, respect, admin_tier, jailed_until, bounty, crew_id, last_work, last_daily, job_active, job_finish_time, last_business_collect, career_track, career_rank, arrest_count, bail_count, pardon_count, expose_count, amnesty_count"
+
+def get_rank_title(track: str, rank: int) -> str:
+    titles = RANK_TITLES.get(track, [])
+    if 0 <= rank < len(titles):
+        return titles[rank]
+    return f"Rank {rank}"
+
+async def check_and_update_rank(db, user_id: int, track: str, current_count: int, current_rank: int) -> tuple[int, bool]:
+    new_rank = current_rank
+    for i, threshold in enumerate(RANK_THRESHOLDS):
+        if current_count >= threshold:
+            new_rank = i + 1
+        else:
+            break
+    new_rank = min(new_rank, 6)
+    promoted = new_rank > current_rank
+    if promoted:
+        await db.execute("UPDATE users SET career_rank = ? WHERE user_id = ?", (new_rank, user_id))
+        await db.commit()
+    return new_rank, promoted
+
+def parse_target_id(context) -> int | None:
+    if not context.args or not context.args[0].lstrip("-").isdigit():
+        return None
+    return int(context.args[0])
 
 async def get_or_create_user(db, user_id: int, username: str):
     """Fungsi standar untuk mengambil/membuat data user & memastikan struktur DB siap."""
@@ -160,10 +219,10 @@ async def get_or_create_user(db, user_id: int, username: str):
             return await cursor.fetchone()
 
 # ==========================================
-# KATALOG ITEM & BLACKMARKET
+# KATALOG ITEM & BLACKMARKET (DIPERBAARUI)
 # ==========================================
 CATALOG = {
-    # MAKANAN (F1-F10)
+    # MAKANAN (F1-F12)
     "F1": {"name": "Panini Salami", "type": "food", "price": 500, "vit": 20, "desc": "Sandwich klasik Italia"},
     "F2": {"name": "Pasta Carbonara", "type": "food", "price": 800, "vit": 25, "desc": "Pasta creamy dengan bacon & keju"},
     "F3": {"name": "Risotto Truffle", "type": "food", "price": 2000, "vit": 40, "desc": "Risotto premium dengan truffle asli"},
@@ -174,8 +233,10 @@ CATALOG = {
     "F8": {"name": "Tiramisu Italiano", "type": "food", "price": 1500, "vit": 35, "desc": "Dessert manis dengan kopi & mascarpone"},
     "F9": {"name": "Caviar Deluxe", "type": "food", "price": 5000, "vit": 60, "desc": "Caviar murni dari Rusia"},
     "F10": {"name": "Foie Gras", "type": "food", "price": 4500, "vit": 55, "desc": "Hati angsa premium"},
+    "F11": {"name": "Gelato Sicilian", "type": "food", "price": 400, "vit": 18, "desc": "Es krim segar khas Sisilia"},
+    "F12": {"name": "Prosciutto e Melone", "type": "food", "price": 1800, "vit": 38, "desc": "Hidangan pembuka ham & melon"},
 
-    # MINUMAN (D1-D10)
+    # MINUMAN (D1-D12)
     "D1": {"name": "Espresso Italian", "type": "drink", "price": 300, "vit": 15, "desc": "Kopi espresso murni"},
     "D2": {"name": "Cappuccino Premium", "type": "drink", "price": 600, "vit": 20, "desc": "Cappuccino foam lembut"},
     "D3": {"name": "Whiskey Scotch 18Y", "type": "drink", "price": 2000, "vit": 35, "desc": "Whiskey aged 18 tahun"},
@@ -186,8 +247,10 @@ CATALOG = {
     "D8": {"name": "Gin Bombay", "type": "drink", "price": 1000, "vit": 22, "desc": "Gin premium botanicals"},
     "D9": {"name": "Martini Dry", "type": "drink", "price": 2200, "vit": 32, "desc": "Cocktail klasik gentleman"},
     "D10": {"name": "Sake Premium Dassai", "type": "drink", "price": 3500, "vit": 42, "desc": "Sake premium Jepang"},
+    "D11": {"name": "Limoncello Tradizionale", "type": "drink", "price": 900, "vit": 24, "desc": "Liqueur lemon khas Italia Selatan"},
+    "D12": {"name": "Cognac Hennessy XO", "type": "drink", "price": 4800, "vit": 50, "desc": "Cognac kelas tinggi beraroma kayu oak"},
 
-    # SENJATA (W1-W12)
+    # SENJATA (W1-W14)
     "W1": {"name": "Pistol 9MM", "type": "weapon", "price": 5000, "desc": "Entry-level senjata"},
     "W2": {"name": "Revolver .45", "type": "weapon", "price": 8000, "desc": "Powerful handgun"},
     "W3": {"name": "Shotgun Combat", "type": "weapon", "price": 15000, "desc": "Heavy damage"},
@@ -200,8 +263,10 @@ CATALOG = {
     "W10": {"name": "Desert Eagle Gold", "type": "weapon", "price": 25000, "desc": "Prestige weapon emas"},
     "W11": {"name": "Combat Shotgun Tactical", "type": "weapon", "price": 22000, "desc": "Balanced heavy weapon"},
     "W12": {"name": "Plasma Rifle (Rare)", "type": "weapon", "price": 50000, "desc": "Senjata legendaris futuristik"},
+    "W13": {"name": "Submachine Gun Tommy Gun", "type": "weapon", "price": 32000, "desc": "Senjata ikonik para gangster mafia klasik"},
+    "W14": {"name": "Kevlar Stun Baton", "type": "weapon", "price": 6000, "desc": "Tongkat kejut taktis non-lethal penegak hukum"},
 
-    # ARMOR (A1-A11)
+    # ARMOR (A1-A12)
     "A1": {"name": "Leather Jacket", "type": "armor", "price": 3000, "desc": "Jaket kulit mafia"},
     "A2": {"name": "Kevlar Vest", "type": "armor", "price": 10000, "desc": "Tactical kevlar"},
     "A3": {"name": "Police Riot Gear", "type": "armor", "price": 12000, "desc": "Gear bekas polisi"},
@@ -213,8 +278,9 @@ CATALOG = {
     "A9": {"name": "Neon Energy Shield", "type": "armor", "price": 35000, "desc": "Tech defense shield"},
     "A10": {"name": "Cyberpunk Exo-Skeleton", "type": "armor", "price": 60000, "desc": "Exo-skeleton penguat"},
     "A11": {"name": "Royal Guard Armor", "type": "armor", "price": 80000, "desc": "Armor legendaris"},
+    "A12": {"name": "Ballistic Shield Elite", "type": "armor", "price": 28000, "desc": "Perisai portabel pelindung regu penyergap"},
 
-    # PERHIASAN (J1-J15)
+    # PERHIASAN (J1-J16)
     "J1": {"name": "Silver Ring", "type": "jewelry", "price": 2000, "desc": "Cincin perak murni"},
     "J2": {"name": "Gold Chain", "type": "jewelry", "price": 5000, "desc": "Rantai emas murni"},
     "J3": {"name": "Diamond Earring", "type": "jewelry", "price": 12000, "desc": "Anting berlian"},
@@ -230,8 +296,9 @@ CATALOG = {
     "J13": {"name": "Fabergé Egg Replica", "type": "jewelry", "price": 300000, "desc": "Telur Fabergé bersejarah"},
     "J14": {"name": "Imperial Jade Pendant", "type": "jewelry", "price": 400000, "desc": "Liontin giok kekaisaran"},
     "J15": {"name": "Papal Ring Legendary", "type": "jewelry", "price": 500000, "desc": "Cincin bersejarah agung"},
+    "J16": {"name": "Black Diamond Brooch", "type": "jewelry", "price": 270000, "desc": "Bros berlian hitam langka"},
 
-    # PROPERTI (H1-H12)
+    # PROPERTI (H1-H13)
     "H1": {"name": "Apartment Downtown", "type": "property", "price": 50000, "passive": 500, "desc": "Apartemen pusat kota"},
     "H2": {"name": "Suburban House", "type": "property", "price": 100000, "passive": 1000, "desc": "Rumah pinggiran kota"},
     "H3": {"name": "Luxury Villa", "type": "property", "price": 250000, "passive": 2500, "desc": "Villa mewah kolam renang"},
@@ -244,8 +311,9 @@ CATALOG = {
     "H10": {"name": "Country Estate", "type": "property", "price": 800000, "passive": 9000, "desc": "Perkebunan & tanah estate"},
     "H11": {"name": "Penthouse Malacca", "type": "property", "price": 1500000, "passive": 12000, "desc": "Penthouse Selat Malaka"},
     "H12": {"name": "Royal Palace", "type": "property", "price": 3000000, "passive": 20000, "desc": "Istana megah megah"},
+    "H13": {"name": "Subterranean Safehouse", "type": "property", "price": 950000, "passive": 11000, "desc": "Bunker rahasia bawah tanah dengan sistem pemantauan otomatis"},
 
-    # KENDARAAN (V1-V14)
+    # KENDARAAN (V1-V15)
     "V1": {"name": "Scooter 125cc", "type": "vehicle", "price": 30000, "passive": 100, "desc": "Skuter hemat energi"},
     "V2": {"name": "Sedan Classic", "type": "vehicle", "price": 60000, "passive": 250, "desc": "Sedan hitam standar mafia"},
     "V3": {"name": "SUV Armored", "type": "vehicle", "price": 150000, "passive": 600, "desc": "SUV anti-peluru"},
@@ -260,8 +328,9 @@ CATALOG = {
     "V12": {"name": "Armored Truck", "type": "vehicle", "price": 400000, "passive": 1500, "desc": "Truk baja uang"},
     "V13": {"name": "Private Jet", "type": "vehicle", "price": 2500000, "passive": 6000, "desc": "Pesawat jet pribadi"},
     "V14": {"name": "Koenigsegg Hypercar", "type": "vehicle", "price": 2000000, "passive": 5000, "desc": "Hypercar tercepat"},
+    "V15": {"name": "Tactical Interceptor Patrol", "type": "vehicle", "price": 350000, "passive": 1400, "desc": "Mobil patroli taktis kecepatan tinggi berspesifikasi khusus"},
 
-    # SERAGAM (S1-S7)
+    # SERAGAM (S1-S8)
     "S1": {"name": "Casual Street", "type": "suit", "price": 10000, "desc": "Pakaian jalanan biasa"},
     "S2": {"name": "Business Formal", "type": "suit", "price": 25000, "desc": "Jas bisnis formal"},
     "S3": {"name": "Tactical Combat", "type": "suit", "price": 40000, "desc": "Seragam tempur taktis"},
@@ -269,6 +338,7 @@ CATALOG = {
     "S5": {"name": "Executive Suit", "type": "suit", "price": 80000, "desc": "Setelan pimpinan eksekutif"},
     "S6": {"name": "Silk Robe Mafia", "type": "suit", "price": 100000, "desc": "Jubah sutra elegan bos"},
     "S7": {"name": "Don Signature Suit", "type": "suit", "price": 150000, "desc": "Setelan khas Godfather"},
+    "S8": {"name": "Diplomatic Gala Attire", "type": "suit", "price": 120000, "desc": "Setelan gaun/jas khusus jamuan tinggi pejabat kenegaraan"},
 
     # GELAR PANGKAT (G1-G7)
     "G1": {"name": "Made Man", "type": "gelar", "price": 5000, "desc": "Tier 1: Anggota resmi keluarga"},
@@ -279,7 +349,7 @@ CATALOG = {
     "G6": {"name": "Caporegime Supremo", "type": "gelar", "price": 1000000, "desc": "Tier 6: Komandan tertinggi"},
     "G7": {"name": "Don / Donna Famiglia", "type": "gelar", "price": 2500000, "desc": "Tier 7: Penguasa puncak"},
 
-    # BISNIS (B1-B13)
+    # BISNIS (B1-B14)
     "B1": {"name": "Kedai Kopi", "type": "business", "price": 10000, "passive": 300, "desc": "Kedai kopi pencuci uang"},
     "B2": {"name": "Toko Pakaian", "type": "business", "price": 30000, "passive": 800, "desc": "Boutique formal"},
     "B3": {"name": "Bar & Lounge", "type": "business", "price": 70000, "passive": 2000, "desc": "Tempat hiburan malam"},
@@ -292,20 +362,21 @@ CATALOG = {
     "B10": {"name": "Bank Swasta Lokal", "type": "business", "price": 500000, "passive": 10000, "desc": "Lembaga keuangan pribadi"},
     "B11": {"name": "Media Kontrol Pers", "type": "business", "price": 600000, "passive": 12000, "desc": "Perusahaan pers propaganda"},
     "B12": {"name": "Perusahaan Minyak", "type": "business", "price": 800000, "passive": 15000, "desc": "Kilang minyak bumi"},
-    "B13": {"name": "Syndicate Kartel Global", "type": "business", "price": 1000000, "passive": 20000, "desc": "Konsorsium kriminal dunia"}
+    "B13": {"name": "Syndicate Kartel Global", "type": "business", "price": 1000000, "passive": 20000, "desc": "Konsorsium kriminal dunia"},
+    "B14": {"name": "Biro Hukum & Pertanahan", "type": "business", "price": 320000, "passive": 7500, "desc": "Kantor hukum komersial pengelola persetujuan izin bangunan"}
 }
 
 CATEGORIES_MAP = {
-    "makanan": ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10"],
-    "minuman": ["D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10"],
-    "senjata": [f"W{i}" for i in range(1, 13)],
-    "armor": [f"A{i}" for i in range(1, 12)],
-    "perhiasan": [f"J{i}" for i in range(1, 16)],
-    "properti": [f"H{i}" for i in range(1, 13)],
-    "kendaraan": [f"V{i}" for i in range(1, 15)],
-    "seragam": [f"S{i}" for i in range(1, 8)],
+    "makanan": [f"F{i}" for i in range(1, 13)],
+    "minuman": [f"D{i}" for i in range(1, 13)],
+    "senjata": [f"W{i}" for i in range(1, 15)],
+    "armor": [f"A{i}" for i in range(1, 13)],
+    "perhiasan": [f"J{i}" for i in range(1, 17)],
+    "properti": [f"H{i}" for i in range(1, 14)],
+    "kendaraan": [f"V{i}" for i in range(1, 16)],
+    "seragam": [f"S{i}" for i in range(1, 9)],
     "gelar": [f"G{i}" for i in range(1, 8)],
-    "bisnis": [f"B{i}" for i in range(1, 14)]
+    "bisnis": [f"B{i}" for i in range(1, 15)]
 }
 
 def generate_certificate(user_id: int, asset_code: str, asset_name: str, price: int) -> tuple:
@@ -346,6 +417,9 @@ def get_main_menu_keyboard():
         [
             InlineKeyboardButton("💼 Bisnis Pasif", callback_data="vmenu_business"),
             InlineKeyboardButton("🎒 Portofolio & Aset", callback_data="vmenu_portfolio")
+        ],
+        [
+            InlineKeyboardButton("💼 Karir & Profesi", callback_data="vmenu_career")
         ],
         [
             InlineKeyboardButton("🛠️ Vault Admin", callback_data="vmenu_admin")
@@ -398,7 +472,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🏛️ <b>SELAMAT DATANG DI PUSAT VAULT & PERBANKAN COSA NOSTRA</b>\n"
         "──────────────────────────────────────────\n"
         "<i>\"Honor, Loyalty, and Excellence in Every Transaction.\"</i>\n\n"
-        "Selamat datang di Portal Administrasi Finansial & Vault Utama. Kami siap melayani serta memfasilitasi seluruh kebutuhan transaksi perbankan, perolehan aset premium, kepemilikan sertifikasi digital, dan manajemen investasi pasif Anda secara profesional, transparan, dan aman.\n\n"
+        "Selamat datang di Portal Administrasi Finansial & Vault Utama. Kami siap melayani serta memfasilitasi seluruh kebutuhan transaksi perbankan, perolehan aset premium, kepemilikan sertifikasi digital, investigasi pers jurnalis, penerbitan kebijakan amnesti politisi, dan manajemen investasi pasif Anda secara profesional, transparan, dan aman.\n\n"
         "Silakan pilih kategori layanan yang Anda butuhkan melalui tombol interaktif di bawah ini:"
     )
     if update.callback_query:
@@ -463,6 +537,16 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
         )
         await query.edit_message_text(text, reply_markup=get_back_button(), parse_mode="HTML")
 
+    elif data == "vmenu_career":
+        text = (
+            "💼 <b>SUB-MENU PROFESI & KARIR PUBLIK</b>\n\n"
+            "• <code>/career</code> — Cek status karir & opsi pendaftaran profesi\n"
+            "• <code>/badge</code> — Cek progres lencana pangkat profesi\n"
+            "• <code>/expose [user_id]</code> — Rilis berita investigasi audit target (Journalist)\n"
+            "• <code>/amnesty [user_id]</code> — Terbitkan amnesti pemotongan Heat/Bounty (Politician)"
+        )
+        await query.edit_message_text(text, reply_markup=get_back_button(), parse_mode="HTML")
+
     elif data == "vmenu_admin":
         user_id = update.effective_user.id
         async with get_db_connection() as db:
@@ -500,6 +584,233 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
 # ==========================================
 # PUBLIC COMMAND HANDLERS
 # ==========================================
+async def cmd_career(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    current_username = update.effective_user.username or update.effective_user.first_name or "TanpaUsername"
+    async with get_db_connection() as db:
+        user = await get_or_create_user(db, user_id, current_username)
+        gelar_tier = user[6]
+        track = user[18]
+        rank = user[19]
+        arrest = user[20]
+        bail = user[21]
+        pardon = user[22]
+        expose = user[23]
+        amnesty = user[24]
+
+        if context.args and context.args[0].lower() == "choose":
+            if len(context.args) < 2:
+                return await update.message.reply_text(
+                    "📋 <b>PILIH JALUR KARIR RESMI</b>\n\n"
+                    "Opsi jalur karir publik yang tersedia:\n"
+                    "• <code>police</code> — Penegak Hukum & Pemburu Buronan\n"
+                    "• <code>lawyer</code> — Pengacara & Penjamin Tahanan\n"
+                    "• <code>judge</code> — Hakim Agung Pemutus Vonis\n"
+                    "• <code>politician</code> — Pejabat Publik & Kebijakan\n"
+                    "• <code>journalist</code> — Jurnalis Investigasi & Audit\n\n"
+                    "Format: <code>/career choose [track]</code>\n"
+                    "<i>Contoh: /career choose journalist</i>",
+                    parse_mode="HTML"
+                )
+
+            selected = context.args[1].lower()
+            if selected not in RANK_TITLES:
+                return await update.message.reply_text("❌ Jalur karir tidak valid. Pilih antara: police, lawyer, judge, politician, atau journalist.")
+
+            if gelar_tier != "G0":
+                return await update.message.reply_text(
+                    "🚫 <b>KONFLIK KEPENTINGAN DITOLAK!</b>\n\n"
+                    f"Anda sudah memegang gelar Sindikat Mafia (<b>{gelar_tier}</b>). "
+                    "Petinggi kartel tidak dapat merangkap jabatan sebagai Pejabat / Jurnalis Publik!",
+                    parse_mode="HTML"
+                )
+
+            await db.execute("UPDATE users SET career_track = ?, career_rank = 0 WHERE user_id = ?", (selected, user_id))
+            await db.commit()
+            
+            title = get_rank_title(selected, 0)
+            return await update.message.reply_text(
+                f"📑 <b>PELANTIKAN KARIR PUBLIK BERHASIL!</b>\n\n"
+                f"Jalur Karir  : <b>{selected.upper()}</b>\n"
+                f"Pangkat Awal : <b>{title}</b> (Rank 0)\n\n"
+                f"Laksanakan tugas operasional Anda untuk menaikkan pangkat!",
+                parse_mode="HTML"
+            )
+
+        title = get_rank_title(track, rank) if track != "mafia" else f"Mafia ({gelar_tier})"
+        count_map = {
+            "police": (arrest, "Penangkapan"),
+            "lawyer": (bail, "Pembebasan Bail"),
+            "judge": (pardon, "Pemberian Ampunan"),
+            "politician": (amnesty, "Amnesti Publik"),
+            "journalist": (expose, "Laporan Investigasi")
+        }
+        
+        stat_info = ""
+        if track in count_map:
+            val, label = count_map[track]
+            stat_info = f"\n📊 Record Operasional : <b>{val} {label}</b>"
+
+        text = (
+            f"💼 <b>PROFIL KARIR & OTORITAS PUBLIK</b>\n"
+            f"──────────────────────────────\n"
+            f"Jalur Karir  : <b>{track.upper()}</b>\n"
+            f"Pangkat/Rank : <b>{title}</b> (Rank {rank}){stat_info}\n"
+            f"──────────────────────────────\n"
+            f"<i>Gunakan '/career choose [track]' jika ingin beralih profesi (Khusus non-mafia G0).</i>"
+        )
+        await update.message.reply_text(text, parse_mode="HTML")
+
+async def cmd_badge(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    current_username = update.effective_user.username or update.effective_user.first_name or "TanpaUsername"
+    async with get_db_connection() as db:
+        user = await get_or_create_user(db, user_id, current_username)
+        track = user[18]
+        rank = user[19]
+        arrest = user[20]
+        bail = user[21]
+        pardon = user[22]
+        expose = user[23]
+        amnesty = user[24]
+
+        if track == "mafia":
+            return await update.message.reply_text("🍷 Lencana karir publik tidak berlaku untuk jajaran Sindikat Mafia. Naikkan gelar hirarki via Shop!")
+
+        count_map = {
+            "police": arrest,
+            "lawyer": bail,
+            "judge": pardon,
+            "politician": amnesty,
+            "journalist": expose
+        }
+
+        current_count = count_map.get(track, 0)
+        title = get_rank_title(track, rank)
+
+        if rank >= 6:
+            progress_str = "🏆 <b>RANK MAKSIMAL TERCAPAI (Media Mogul / Titan)</b>"
+        else:
+            target_next = RANK_THRESHOLDS[rank]
+            remaining = target_next - current_count
+            next_title = get_rank_title(track, rank + 1)
+            progress_str = (
+                f"🎯 Next Rank    : <b>{next_title}</b> (Rank {rank + 1})\n"
+                f"📈 Progres Target: <b>{current_count}/{target_next}</b> (Sisa {remaining} tindakan lagi)"
+            )
+
+        text = (
+            f"🎖️ <b>LENCANA INSIGNIA & PROGRES PANGKAT</b>\n"
+            f"──────────────────────────────\n"
+            f"Profesi      : <b>{track.upper()}</b>\n"
+            f"Lencana Aktif: <b>{title}</b> (Rank {rank})\n"
+            f"──────────────────────────────\n"
+            f"{progress_str}"
+        )
+        await update.message.reply_text(text, parse_mode="HTML")
+
+async def cmd_expose(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Khusus Jurnalis: Publikasikan rincian aset & Heat target ke publik."""
+    user_id = update.effective_user.id
+    current_username = update.effective_user.username or update.effective_user.first_name or "TanpaUsername"
+    target_id = parse_target_id(context)
+
+    if not target_id:
+        return await update.message.reply_text("Format laporan investigasi: <code>/expose [user_id]</code>", parse_mode="HTML")
+
+    async with get_db_connection() as db:
+        user = await get_or_create_user(db, user_id, current_username)
+        track = user[18]
+        rank = user[19]
+        expose_count = user[23]
+
+        if track != "journalist":
+            return await update.message.reply_text("🚫 Akses pengeluaran laporan investigasi publik (Expose) hanya dimiliki oleh Jurnalis!")
+
+        async with db.execute("SELECT username, koin, bank_balance, heat, bounty FROM users WHERE user_id = ?", (target_id,)) as cursor:
+            target = await cursor.fetchone()
+
+        if not target:
+            return await update.message.reply_text("❌ Citizen ID target tidak ditemukan.")
+
+        t_name, t_koin, t_bank, t_heat, t_bounty = target
+        royalty = 3000 + (rank * 1200)
+
+        await db.execute("UPDATE users SET koin = koin + ?, expose_count = expose_count + 1 WHERE user_id = ?", (royalty, user_id))
+        
+        new_expose = expose_count + 1
+        new_rank, promoted = await check_and_update_rank(db, user_id, "journalist", new_expose, rank)
+        await db.commit()
+
+        promo_msg = f"\n🎉 <b>PROMOSI PANGKAT!</b> Selamat, Anda naik pangkat ke <b>{get_rank_title('journalist', new_rank)}</b>!" if promoted else ""
+
+        text = (
+            f"📰 <b>BERITA UTAMA — INVESTIGASI MEDIA EXPOSE!</b>\n\n"
+            f"Subjek Investigasi: <b>@{t_name}</b> (<code>{target_id}</code>)\n"
+            f"──────────────────────────────\n"
+            f"💵 Likuiditas Cash: <b>{t_koin:,} Koin</b>\n"
+            f"🏦 Deposito Bank : <b>{t_bank:,} Koin</b>\n"
+            f"🔥 Level Heat   : <b>{t_heat}</b>\n"
+            f"🎯 Status Bounty : <b>{t_bounty:,} Koin</b>\n"
+            f"──────────────────────────────\n"
+            f"🖋️ Royalty Artikel: <b>+{royalty:,} Koin</b>\n"
+            f"📊 Total Laporan  : {new_expose} Laporan Terbit{promo_msg}"
+        )
+        await update.message.reply_text(text, parse_mode="HTML")
+
+async def cmd_amnesty(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Khusus Politisi: Menerbitkan amnesties pemotongan Heat & Bounty target."""
+    user_id = update.effective_user.id
+    current_username = update.effective_user.username or update.effective_user.first_name or "TanpaUsername"
+    target_id = parse_target_id(context)
+
+    if not target_id:
+        return await update.message.reply_text("Format permohonan amnesties: <code>/amnesty [user_id]</code>", parse_mode="HTML")
+
+    async with get_db_connection() as db:
+        user = await get_or_create_user(db, user_id, current_username)
+        track = user[18]
+        rank = user[19]
+        amnesty_count = user[24]
+
+        if track != "politician":
+            return await update.message.reply_text("🚫 Otoritas pengeluaran kebijakan Amnesti Publik hanya dimiliki oleh Politisi!")
+
+        async with db.execute("SELECT username, heat, bounty FROM users WHERE user_id = ?", (target_id,)) as cursor:
+            target = await cursor.fetchone()
+
+        if not target:
+            return await update.message.reply_text("❌ Citizen ID target tidak ditemukan.")
+
+        t_name, t_heat, t_bounty = target
+
+        if t_heat == 0 and t_bounty == 0:
+            return await update.message.reply_text("⚠️ Target tidak memiliki Heat atau Bounty aktif untuk diberikan amnesties.")
+
+        # Persentase pemotongan Heat/Bounty berdasarkan rank politisi (20% s/d 80%)
+        reduction_rate = 0.20 + (rank * 0.10)
+        new_heat = int(t_heat * (1 - reduction_rate))
+        new_bounty = int(t_bounty * (1 - reduction_rate))
+
+        await db.execute("UPDATE users SET heat = ?, bounty = ? WHERE user_id = ?", (new_heat, new_bounty, target_id))
+        await db.execute("UPDATE users SET amnesty_count = amnesty_count + 1 WHERE user_id = ?", (user_id,))
+
+        new_amnesty = amnesty_count + 1
+        new_rank, promoted = await check_and_update_rank(db, user_id, "politician", new_amnesty, rank)
+        await db.commit()
+
+        promo_msg = f"\n🎉 <b>PROMOSI PANGKAT!</b> Selamat, Anda naik pangkat ke <b>{get_rank_title('politician', new_rank)}</b>!" if promoted else ""
+
+        text = (
+            f"🏛️ <b>KEBIJAKAN AMNESTI PUBLIK DITERBITKAN!</b>\n\n"
+            f"Subjek Penerima : <b>@{t_name}</b> (<code>{target_id}</code>)\n"
+            f"📊 Potongan Resiko: <b>{int(reduction_rate * 100)}%</b>\n"
+            f"🔥 Heat Baru    : {t_heat} ➔ <b>{new_heat}</b>\n"
+            f"🎯 Bounty Baru  : {t_bounty:,} ➔ <b>{new_bounty:,} Koin</b>\n"
+            f"🗳️ Rekor Politisi : {new_amnesty} Kebijakan Disahkan{promo_msg}"
+        )
+        await update.message.reply_text(text, parse_mode="HTML")
+
 async def cmd_shop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     category = args[0].lower() if args else None
@@ -1100,6 +1411,12 @@ def build_app():
     app.add_handler(CommandHandler("portfolio", cmd_portfolio))
     app.add_handler(CommandHandler("inventory", cmd_portfolio))
     app.add_handler(CommandHandler("certificate", cmd_certificate))
+
+    # Public Career & Professional Commands
+    app.add_handler(CommandHandler("career", cmd_career))
+    app.add_handler(CommandHandler("badge", cmd_badge))
+    app.add_handler(CommandHandler("expose", cmd_expose))
+    app.add_handler(CommandHandler("amnesty", cmd_amnesty))
 
     # Admin Inspection Commands
     app.add_handler(CommandHandler("cek_rekening", cmd_cek_rekening))
