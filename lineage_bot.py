@@ -306,9 +306,9 @@ async def global_error_handler(update: object, context: ContextTypes.DEFAULT_TYP
     logger.error(f"Exception occurred while handling an update: {context.error}", exc_info=context.error)
     if isinstance(update, Update) and update.effective_message:
         await update.effective_message.reply_text(
-            "⚠️ <b>Aduh, Terjadi Kesalahan Teknis!</b>\n\n"
-            "Sistem baru saja mengalami kendala pemrosesan. Coba ulangi perintah Kakak sekali lagi ya. "
-            "Jika masih terjadi masalah, pastikan Kakak sudah mendaftar via <code>/register</code>!",
+            "⚠️ <b>GANGGUAN TUKAR INFORMASI!</b>\n\n"
+            "Sistem arsip sedang mengalami gangguan sinyal. Coba ulangi perintah Anda sekali lagi. "
+            "Jika berlanjut, pastikan identitas Anda sudah terdaftar di Registry via <code>/register</code>.",
             parse_mode="HTML"
         )
 
@@ -335,11 +335,10 @@ async def user_exists(db, user_id: int) -> bool:
 async def ensure_user_registered(update: Update, db, user_id: int) -> bool:
     if not await user_exists(db, user_id):
         await update.message.reply_text(
-            "💁‍♀️ <b>Aduh Kak, Nama Kakak Belum Ada di Buku Tamu!</b>\n\n"
-            "Kakak belum terdaftar di database Cosa Nostra nih. Gimana mau nikah atau mendaftar keluarga kalau belum punya KTP-nya?\n\n"
-            "👉 <b>Yuk daftar dulu:</b>\n"
-            "Ketik perintah <code>/register</code> langsung di sini! "
-            "Habis itu baru deh bergaul dan cari pasangan! 😉",
+            "📋 <b>IDENTITAS TIDAK DITEMUKAN DALAM REKOR DINASTI!</b>\n\n"
+            "Anda belum terdaftar di registry KTP Kota Cosa Nostra. Sistem tidak dapat mencatat aliansi, pernikahan, atau dinasti tanpa dokumen legal.\n\n"
+            "👉 <b>Segera daftarkan diri Anda:</b>\n"
+            "Ketik <code>/register</code> untuk membuat dokumen KTP Citizen resmi sekarang.",
             parse_mode="HTML"
         )
         return False
@@ -367,7 +366,7 @@ async def add_koin(db, user_id: int, amount: int):
 async def calculate_net_worth(db, user_id: int) -> tuple:
     """
     Menghitung total kekayaan bersih (Net Worth):
-    Net Worth = Koin Tunai + Saldo Bank + (Vault Keluarga jika Kepala Keluarga).
+    Net Worth = Koin Tunai + Saldo Bank + Vault Kas Dinasti (Bila Kepala Keluarga).
     """
     try:
         async with db.execute("SELECT koin, bank_balance FROM users WHERE user_id = ?", (user_id,)) as cursor:
@@ -497,18 +496,18 @@ async def reg_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await ensure_all_tables_exist(db)
         if await user_exists(db, user_id):
             await update.message.reply_text(
-                "💁‍♀️ <b>Kakak Sudah Terdaftar!</b>\n\n"
-                "KTP Kakak sudah tercatat di database. Ketik <code>/ktp</code> untuk melihat data KTP Kakak.\n\n"
-                "⚠️ <b>Apabila ada kesalahan data pada KTP, segera hubungi Admin ya!</b>",
+                "📜 <b>IDENTITAS ANDA SUDAH TERDAFTAR!</b>\n\n"
+                "KTP Citizen Anda sudah tercatat resmi di database Sindikat. Ketik <code>/ktp</code> untuk memeriksa profil publik Anda.\n\n"
+                "💡 <i>Membutuhkan revisi data identitas? Silakan ajukan ke Dewan Administrator.</i>",
                 parse_mode="HTML"
             )
             return ConversationHandler.END
 
     await update.message.reply_text(
-        "📝 <b>PENDAFTARAN KTP COSA NOSTRA</b>\n\n"
-        "Yuk isi data identitas kamu! Pertanyaan pertama:\n"
-        "<b>Silakan masukkan NAMA LENGKAP karakter kamu:</b>\n"
-        "<i>(Contoh: Alex Pratama)</i>",
+        "📝 <b>PENDAFTARAN REGISTRY KTP CITIZEN COSA NOSTRA</b>\n\n"
+        "Mari lengkapi berkas sipil Anda untuk arsip kota.\n"
+        "<b>1. Masukkan NAMA LENGKAP karakter Anda:</b>\n"
+        "<i>(Contoh: Don Vitorio Scaletta)</i>",
         parse_mode="HTML"
     )
     return REG_NAMA
@@ -517,8 +516,8 @@ async def reg_nama(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['nama_lengkap'] = update.message.text.strip()
     await update.message.reply_text(
         "🎭 <b>NAMA MUSE / AVATAR:</b>\n\n"
-        "Masukkan Nama Muse atau FC yang kamu pakai:\n"
-        "<i>(Contoh: Character Alpha / OC)</i>",
+        "Masukkan nama Muse / Face Claim (FC) yang digunakan:\n"
+        "<i>(Contoh: Character Alpha / Original Concept)</i>",
         parse_mode="HTML"
     )
     return REG_MUSE
@@ -526,9 +525,9 @@ async def reg_nama(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def reg_muse(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['muse'] = update.message.text.strip()
     await update.message.reply_text(
-        "🎂 <b>UMUR:</b>\n\n"
-        "Berapa umur karakter kamu saat ini? (Ketik Angka Saja):\n"
-        "<i>(Contoh: 24)</i>",
+        "🎂 <b>USIA OPERASIONAL:</b>\n\n"
+        "Masukkan umur karakter Anda (Gunakan format angka):\n"
+        "<i>(Contoh: 28)</i>",
         parse_mode="HTML"
     )
     return REG_UMUR
@@ -536,14 +535,14 @@ async def reg_muse(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def reg_umur(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     if not text.isdigit():
-        await update.message.reply_text("❌ Umur harus berupa angka ya Kak! Coba masukkan ulang umurnya:")
+        await update.message.reply_text("❌ Input tidak valid! Usia harus ditulis dengan angka murni. Coba ulang:")
         return REG_UMUR
 
     context.user_data['umur'] = int(text)
     await update.message.reply_text(
         "📅 <b>TANGGAL LAHIR:</b>\n\n"
-        "Masukkan Tanggal Lahir karakter kamu:\n"
-        "<i>(Format: DD-MM-YYYY, Contoh: 15-08-1998)</i>",
+        "Masukkan tanggal lahir karakter Anda:\n"
+        "<i>(Format: DD-MM-YYYY, Contoh: 15-08-1996)</i>",
         parse_mode="HTML"
     )
     return REG_TGLLAHIR
@@ -577,27 +576,27 @@ async def reg_tgl_lahir(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     ktp_card = (
         "🪪 <b>KARTU TANDA PENDUKUK (KTP) DIGITAL</b>\n"
-        "🏛️ <b>KOTA COSA NOSTRA</b>\n"
+        "🏛️ <b>KOTA COSA NOSTRA NETWORK</b>\n"
         "──────────────────────────────\n"
         f"👤 <b>Nama Lengkap :</b> {nama}\n"
         f"🎭 <b>Muse / Avatar :</b> {muse}\n"
-        f"🎂 <b>Umur         :</b> {umur} Tahun\n"
+        f"🎂 <b>Usia         :</b> {umur} Tahun\n"
         f"📅 <b>Tgl Lahir    :</b> {tgl}\n"
         f"💍 <b>Status Sipil :</b> {status_sipil}\n"
-        f"💼 <b>Gelar / Profesi:</b> {gelar}\n"
+        f"💼 <b>Gelar / Rank :</b> {gelar}\n"
         "──────────────────────────────\n"
         f"💳 <b>ID Citizen   :</b> <code>{user_id}</code>\n"
-        f"💰 <b>Koin Dompet  :</b> {koin:,} Koin\n"
-        f"💎 <b>Total Kekayaan:</b> {net_worth:,} Koin\n\n"
-        "🎉 <i>Pendaftaran KTP Berhasil! Status kamu otomatis LAJANG.\n"
-        "⚠️ <b>Catatan:</b> Jika ada kesalahan saat memasukkan data KTP, segera hubungi Admin untuk melakukan perbaikan!</i>"
+        f"💵 <b>Modal Tunai   :</b> {koin:,} Koin\n"
+        f"💎 <b>Net Worth    :</b> {net_worth:,} Koin\n\n"
+        "🎉 <i>Registrasi Berhasil! Dokumen sipil Anda resmi aktif dengan status LAJANG.\n"
+        "⚠️ <b>Perhatian:</b> Perubahan data identitas dikontrol ketat oleh Dewan Administrator.</i>"
     )
 
     await update.message.reply_text(ktp_card, parse_mode="HTML")
     return ConversationHandler.END
 
 async def reg_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("❌ Proses dibatalkan. Ketik <code>/start</code> untuk kembali ke menu utama!", parse_mode="HTML")
+    await update.message.reply_text("❌ Sesi pengisian formulir dibatalkan. Ketik <code>/start</code> untuk kembali ke Portal.", parse_mode="HTML")
     return ConversationHandler.END
 
 # ==========================================
@@ -612,21 +611,21 @@ async def edit_ktp_admin_start(update: Update, context: ContextTypes.DEFAULT_TYP
         tier = await check_admin_tier(db, user_id)
         if tier < 1:
             return await update.message.reply_text(
-                "🚫 <b>AKSES DITOLAK:</b> Pengubahan data KTP hanya bisa dilakukan oleh Admin.\n\n"
-                "📩 Jika Kakak salah memasukkan data saat pendaftaran KTP, silakan <b>segera hubungi Admin</b> ya!",
+                "🚫 <b>OTORITAS TERBATAS:</b> Koreksi identitas dokumen sipil hanya dapat dieksekusi oleh Administrator.\n\n"
+                "📩 Jika terdapat kekeliruan data pada KTP Anda, ajukan laporan ke Administrator.",
                 parse_mode="HTML"
             )
 
         if target_id is None:
             return await update.message.reply_text(
-                "🛠️ <b>FORMAT ADMIN EDIT KTP:</b>\n\n"
-                "Gunakan: <code>/edit_ktp [user_id_warga]</code>\n"
+                "🛠️ <b>KONTROL REVISI KTP (ADMIN):</b>\n\n"
+                "Gunakan format: <code>/edit_ktp [user_id_target]</code>\n"
                 "Contoh: <code>/edit_ktp 123456789</code>",
                 parse_mode="HTML"
             )
 
         if not await user_exists(db, target_id):
-            return await update.message.reply_text(f"❌ User ID <code>{target_id}</code> tidak ditemukan di database.", parse_mode="HTML")
+            return await update.message.reply_text(f"❌ User ID <code>{target_id}</code> tidak terdaftar di database registry.", parse_mode="HTML")
 
     context.user_data['admin_edit_target_id'] = target_id
 
@@ -640,9 +639,9 @@ async def edit_ktp_admin_start(update: Update, context: ContextTypes.DEFAULT_TYP
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await update.message.reply_text(
-        f"🛠️ <b>ADMIN PANEL — EDIT KTP WARGA</b>\n\n"
-        f"Target User ID: <code>{target_id}</code>\n"
-        f"Pilih bidang yang ingin diubah:",
+        f"🛠️ <b>ADMINISTRATION CONTROL — EDIT KTP WARGA</b>\n\n"
+        f"Target Citizen ID: <code>{target_id}</code>\n"
+        f"Pilih bidang variabel yang ingin diperbarui:",
         reply_markup=reply_markup,
         parse_mode="HTML"
     )
@@ -654,14 +653,14 @@ async def edit_ktp_admin_choice(update: Update, context: ContextTypes.DEFAULT_TY
     data = query.data
 
     if data == "admin_edit_cancel":
-        await query.edit_message_text("❌ Edit KTP oleh Admin dibatalkan.")
+        await query.edit_message_text("❌ Proses revisi KTP dibatalkan oleh Administrator.")
         return ConversationHandler.END
 
     field_map = {
-        "admin_edit_nama_lengkap": ("nama_lengkap", "Masukkan **NAMA LENGKAP** baru untuk warga:"),
-        "admin_edit_muse": ("muse", "Masukkan **MUSE / AVATAR** baru untuk warga:"),
-        "admin_edit_umur": ("umur", "Masukkan **UMUR** baru untuk warga (Angka):"),
-        "admin_edit_tanggal_lahir": ("tanggal_lahir", "Masukkan **TANGGAL LAHIR** baru untuk warga (DD-MM-YYYY):")
+        "admin_edit_nama_lengkap": ("nama_lengkap", "Masukkan **NAMA LENGKAP** baru:"),
+        "admin_edit_muse": ("muse", "Masukkan **MUSE / AVATAR** baru:"),
+        "admin_edit_umur": ("umur", "Masukkan **USIA** baru (Format Angka):"),
+        "admin_edit_tanggal_lahir": ("tanggal_lahir", "Masukkan **TANGGAL LAHIR** baru (DD-MM-YYYY):")
     }
 
     if data in field_map:
@@ -679,7 +678,7 @@ async def edit_ktp_admin_value(update: Update, context: ContextTypes.DEFAULT_TYP
 
     if target_col == "umur":
         if not new_value.isdigit():
-            await update.message.reply_text("❌ Umur harus berupa angka! Masukkan ulang angkanya:")
+            await update.message.reply_text("❌ Input harus berupa angka! Masukkan ulang:")
             return ADMIN_EDIT_VALUE
         new_value = int(new_value)
 
@@ -699,20 +698,20 @@ async def edit_ktp_admin_value(update: Update, context: ContextTypes.DEFAULT_TYP
         net_worth, koin, bank, vault = await calculate_net_worth(db, target_id)
 
     ktp_card = (
-        "✅ <b>DATA KTP WARGA BERHASIL DIPERBARUI OLEH ADMIN!</b>\n\n"
+        "✅ <b>ARSIP KTP WARGA BERHASIL DIPERBARUI!</b>\n\n"
         "🪪 <b>KARTU TANDA PENDUKUK (KTP) DIGITAL</b>\n"
-        "🏛️ <b>KOTA COSA NOSTRA</b>\n"
+        "🏛️ <b>KOTA COSA NOSTRA NETWORK</b>\n"
         "──────────────────────────────\n"
         f"👤 <b>Nama Lengkap :</b> {nama}\n"
         f"🎭 <b>Muse / Avatar :</b> {muse}\n"
-        f"🎂 <b>Umur         :</b> {umur} Tahun\n"
+        f"🎂 <b>Usia         :</b> {umur} Tahun\n"
         f"📅 <b>Tgl Lahir    :</b> {tgl}\n"
         f"💍 <b>Status Sipil :</b> {status_sipil}\n"
-        f"💼 <b>Gelar / Profesi:</b> {gelar}\n"
+        f"💼 <b>Gelar / Rank :</b> {gelar}\n"
         "──────────────────────────────\n"
         f"💳 <b>ID Citizen   :</b> <code>{target_id}</code>\n"
-        f"💰 <b>Koin Dompet  :</b> {koin:,} Koin\n"
-        f"💎 <b>Total Kekayaan:</b> {net_worth:,} Koin"
+        f"💵 <b>Koin Dompet  :</b> {koin:,} Koin\n"
+        f"💎 <b>Total Net Worth:</b> {net_worth:,} Koin"
     )
 
     await update.message.reply_text(ktp_card, parse_mode="HTML")
@@ -728,7 +727,7 @@ async def cmd_ktp(update: Update, context: ContextTypes.DEFAULT_TYPE):
     async with get_db_connection() as db:
         await ensure_all_tables_exist(db)
         if not await user_exists(db, target_id):
-            return await update.message.reply_text(f"❌ User <code>{target_id}</code> belum terdaftar KTP.", parse_mode="HTML")
+            return await update.message.reply_text(f"❌ Target ID <code>{target_id}</code> belum memiliki identitas resmi.", parse_mode="HTML")
 
         async with db.execute(
             """SELECT nama_lengkap, muse, umur, tanggal_lahir, status_sipil, gelar_tier 
@@ -742,18 +741,18 @@ async def cmd_ktp(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         ktp_card = (
             "🪪 <b>KARTU TANDA PENDUKUK (KTP) DIGITAL</b>\n"
-            "🏛️ <b>KOTA COSA NOSTRA</b>\n"
+            "🏛️ <b>KOTA COSA NOSTRA NETWORK</b>\n"
             "──────────────────────────────\n"
             f"👤 <b>Nama Lengkap :</b> {nama}\n"
             f"🎭 <b>Muse / Avatar :</b> {muse}\n"
-            f"🎂 <b>Umur         :</b> {umur} Tahun\n"
+            f"🎂 <b>Usia         :</b> {umur} Tahun\n"
             f"📅 <b>Tgl Lahir    :</b> {tgl}\n"
             f"💍 <b>Status Sipil :</b> {status_sipil}\n"
-            f"💼 <b>Gelar / Profesi:</b> {gelar}\n"
+            f"💼 <b>Gelar / Rank :</b> {gelar}\n"
             "──────────────────────────────\n"
             f"💳 <b>ID Citizen   :</b> <code>{target_id}</code>\n"
             f"💵 <b>Koin Dompet  :</b> {koin:,} Koin\n"
-            f"💎 <b>Total Kekayaan:</b> <b>{net_worth:,} Koin</b>"
+            f"💎 <b>Total Net Worth:</b> <b>{net_worth:,} Koin</b>"
         )
         await update.message.reply_text(ktp_card, parse_mode="HTML")
 
@@ -765,29 +764,29 @@ async def cmd_networth(update: Update, context: ContextTypes.DEFAULT_TYPE):
     async with get_db_connection() as db:
         await ensure_all_tables_exist(db)
         if not await user_exists(db, target_id):
-            return await update.message.reply_text(f"❌ User <code>{target_id}</code> belum terdaftar.", parse_mode="HTML")
+            return await update.message.reply_text(f"❌ Citizen ID <code>{target_id}</code> tidak ditemukan dalam sistem akuntansi.", parse_mode="HTML")
 
         target_name = await get_username(db, target_id)
         net_worth, koin, bank, vault = await calculate_net_worth(db, target_id)
 
-        status_ekonomi = "Warga Klasik"
+        status_ekonomi = "Sipil Biasa (Perlu Bekerja Keras)"
         if net_worth > 50_000_000:
-            status_ekonomi = "👑 Konglomerat Dinasti"
+            status_ekonomi = "👑 Oligarki Dinasti (Miliarder)"
         elif net_worth > 10_000_000:
-            status_ekonomi = "💼 Eksekutif Elit"
+            status_ekonomi = "💼 Eksekutif Kartel Elit"
         elif net_worth > 1_000_000:
-            status_ekonomi = "💵 Kelas Menengah Atas"
+            status_ekonomi = "💵 Pengusaha Sukses"
 
         text = (
-            f"💎 <b>LAPORAN KEKAYAAN BERSIH (NET WORTH)</b>\n"
-            f"Target: <b>@{target_name}</b> (<code>{target_id}</code>)\n"
+            f"💎 <b>AUDIT FINANCIAL & NET WORTH REPORT</b>\n"
+            f"Subjek: <b>@{target_name}</b> (<code>{target_id}</code>)\n"
             f"──────────────────────────────\n"
             f"💵 Cash Tunai   : <b>{koin:,} Koin</b>\n"
-            f"🏦 Tabungan Bank : <b>{bank:,} Koin</b>\n"
-            f"🏛️ Vault Dinasti : <b>{vault:,} Koin</b>\n"
+            f"🏦 Deposit Bank  : <b>{bank:,} Koin</b>\n"
+            f"🏛️ Kas Dinasti   : <b>{vault:,} Koin</b>\n"
             f"──────────────────────────────\n"
             f"🏆 <b>TOTAL NET WORTH : {net_worth:,} Koin</b>\n"
-            f"📊 Status Ekonomi : <b>{status_ekonomi}</b>"
+            f"📊 Hirarki Finansial: <b>{status_ekonomi}</b>"
         )
         await update.message.reply_text(text, parse_mode="HTML")
 
@@ -800,15 +799,15 @@ async def cmd_register_marriage(update: Update, context: ContextTypes.DEFAULT_TY
 
     if target_id is None:
         return await update.message.reply_text(
-            "💁‍♀️ <b>Format Pendaftaran Nikah:</b>\n\n"
-            "Gunakan perintah ini jika kamu & pasangan sudah menikah sebelumnya di RP tapi belum tercatat di bot:\n"
+            "📝 <b>PENDAFTARAN NIKAH MANUAL (LEGACY RP):</b>\n\n"
+            "Gunakan fitur ini untuk mencatatkan status pernikahan lama ke dalam sistem bot:\n"
             "<code>/register_marriage [user_id_pasangan]</code>\n\n"
             "Contoh: <code>/register_marriage 123456789</code>",
             parse_mode="HTML"
         )
 
     if target_id == user_id:
-        return await update.message.reply_text("😅 Mau mendaftarkan nikah dengan diri sendiri? Cari pasangan dulu ya Kak!")
+        return await update.message.reply_text("🤔 Mendaftarkan pernikahan dengan diri sendiri? Sebaiknya cari mitra persekutuan dulu.")
 
     async with get_db_connection() as db:
         await ensure_all_tables_exist(db)
@@ -817,13 +816,13 @@ async def cmd_register_marriage(update: Update, context: ContextTypes.DEFAULT_TY
             return
 
         if not await user_exists(db, target_id):
-            return await update.message.reply_text(f"❌ User <code>{target_id}</code> belum terdaftar di bot KTP.", parse_mode="HTML")
+            return await update.message.reply_text(f"❌ Target pasangan ID <code>{target_id}</code> belum terdaftar KTP.", parse_mode="HTML")
 
         if await get_active_marriage(db, user_id):
-            return await update.message.reply_text("❌ Status Kakak sudah tercatat MENIKAH di database!")
+            return await update.message.reply_text("❌ Status Anda sudah terikat dalam pernikahan aktif!")
 
         if await get_active_marriage(db, target_id):
-            return await update.message.reply_text(f"❌ User <code>{target_id}</code> sudah tercatat menikah dengan orang lain!")
+            return await update.message.reply_text(f"❌ Target ID <code>{target_id}</code> sudah terikat pernikahan dengan pihak lain!")
 
         now_epoch = int(time.time())
         cert_number, sha_hash, date_formatted = generate_marriage_certificate(user_id, target_id)
@@ -841,13 +840,13 @@ async def cmd_register_marriage(update: Update, context: ContextTypes.DEFAULT_TY
         target_name = await get_username(db, target_id)
 
         msg = (
-            "💒 <b>PENDAFTARAN PERNIKAHAN BERHASIL!</b>\n\n"
+            "💒 <b>AKTA PERNIKAHAN TERCATAT RESMI!</b>\n\n"
             f"👰🤵 @{my_name} (<code>{user_id}</code>) ❤️ @{target_name} (<code>{target_id}</code>)\n"
-            f"📜 Sertifikat Nikah: <code>{cert_number}</code>\n"
-            f"🗓️ Terdaftar pada: {date_formatted}\n\n"
-            "✨ <i>Status KTP kalian berdua otomatis menjadi <b>MENIKAH</b>!</i>\n\n"
-            "🏛️ <b>LANGKAH SELANJUTNYA:</b>\n"
-            "Sekarang kalian sudah resmi menjadi suami istri! Yuk dirikan keluarga baru bersama dengan mengetik:\n"
+            f"📜 No. Sertifikat : <code>{cert_number}</code>\n"
+            f"🗓️ Tanggal Catat : {date_formatted}\n\n"
+            "✨ <i>Status Sipil kedua belah pihak resmi diperbarui menjadi <b>MENIKAH</b>!</i>\n\n"
+            "🏛️ <b>REKOMENDASI OPERASIONAL:</b>\n"
+            "Resmikan dinasti keluarga baru Anda melalui komando:\n"
             "<code>/create_family [nama_keluarga]</code>"
         )
         await update.message.reply_text(msg, parse_mode="HTML")
@@ -873,8 +872,8 @@ async def cmd_daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
             hours, remainder = divmod(remaining, 3600)
             minutes, seconds = divmod(remainder, 60)
             return await update.message.reply_text(
-                f"⏳ <b>Sabar Ya Kak!</b>\n\nKakak udah klaim koin harian hari ini. "
-                f"Coba lagi dalam <b>{hours} jam {minutes} menit</b>.",
+                f"⏳ <b>JATAH HARIAN SUDAH DIKLAIM!</b>\n\n"
+                f"Tunjangan harian berikutnya baru dapat dicairkan dalam <b>{hours} jam {minutes} menit</b>.",
                 parse_mode="HTML"
             )
 
@@ -884,9 +883,9 @@ async def cmd_daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await db.commit()
 
         await update.message.reply_text(
-            f"🎁 <b>KLAIM HARIAN BERHASIL!</b>\n\n"
-            f"Kakak mendapatkan tambahan <b>+{daily_reward:,} Koin</b>!\n"
-            f"Jangan lupa balik lagi besok ya~ 😉",
+            f"🎁 <b>TUNJANGAN HARIAN DICAIRKAN!</b>\n\n"
+            f"Kas operasional mendapatkan dana segar <b>+{daily_reward:,} Koin</b>!\n"
+            f"Kembalilah besok untuk klaim berikutnya.",
             parse_mode="HTML"
         )
 
@@ -896,8 +895,9 @@ async def cmd_daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_my_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     await update.message.reply_text(
-        f"💳 <b>INFO ID TELEGRAM</b>\n\nID Anda: <code>{user_id}</code>\n"
-        f"Gunakan ID ini untuk keperluan lamaran atau administrasi keluarga.",
+        f"💳 <b>INFORMASI CITIZEN ID TELEGRAM</b>\n\n"
+        f"ID Anda: <code>{user_id}</code>\n"
+        f"Gunakan ID unik ini dalam transaksi diplomatik atau pendaftaran dinasti.",
         parse_mode="HTML"
     )
 
@@ -933,26 +933,26 @@ async def cmd_tree(update: Update, context: ContextTypes.DEFAULT_TYPE):
             siblings = await cursor.fetchall()
 
         tree_lines = [
-            f"🌳 <b>POHON SILSILAH KELUARGA</b>",
+            f"🌳 <b>DIAGRAM SILSILAH DINASTI</b>",
             f"👤 <b>{target_name}</b> (<code>{target_id}</code>)",
-            f" ┣ 💍 Pasangan: {spouse_str}"
+            f" ┣ 💍 Pasangan Resmi: {spouse_str}"
         ]
 
         if siblings:
-            tree_lines.append(" ┣ 👫 <b>Saudara:</b>")
+            tree_lines.append(" ┣ 👫 <b>Garis Saudara:</b>")
             for a_id, b_id, s_type in siblings:
                 s_id = b_id if a_id == target_id else a_id
                 s_name = await get_username(db, s_id)
                 tree_lines.append(f" ┃  • @{s_name} (<code>{s_id}</code>) [{s_type}]")
 
         if children:
-            tree_lines.append(" ┗ 👶 <b>Anak-Anak:</b>")
+            tree_lines.append(" ┗ 👶 <b>Garis Keturunan:</b>")
             for c_id, c_type in children:
                 c_name = await get_username(db, c_id)
                 label = "Kandung" if c_type == "biological" else "Angkat"
                 tree_lines.append(f"    • @{c_name} (<code>{c_id}</code>) [{label}]")
         else:
-            tree_lines.append(" ┗ 👶 Anak: Belum ada")
+            tree_lines.append(" ┗ 👶 Keturunan: Belum Tercatat")
 
         await update.message.reply_text("\n".join(tree_lines), parse_mode="HTML")
 
@@ -965,15 +965,15 @@ async def cmd_propose(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if target_id is None:
         return await update.message.reply_text(
-            "💁‍♀️ <b>Eits, Mau Lamar Siapa Kak?</b>\n\n"
-            "Formatnya harus sebutin ID pasangannya ya:\n"
+            "💌 <b>PROPOSAL PERSEKUTUAN NIKAH:</b>\n\n"
+            "Format pengajuan lamaran:\n"
             "<code>/propose [user_id] [conventional|modern|secret]</code>\n\n"
             "Contoh: <code>/propose 123456789 modern</code>",
             parse_mode="HTML"
         )
         
     if target_id == user_id:
-        return await update.message.reply_text("😅 Ya ampun Kak... Masak melamar diri sendiri? Cari gebetan dulu gih sana!")
+        return await update.message.reply_text("🤔 Mengirim lamaran ke diri sendiri? Cari aliansi dengan pihak lain.")
 
     m_type = "conventional"
     if len(context.args) > 1 and context.args[1].lower() in ("conventional", "modern", "secret"):
@@ -987,30 +987,29 @@ async def cmd_propose(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if not await user_exists(db, target_id):
             return await update.message.reply_text(
-                f"💁‍♀️ <b>Doi Belum Terdaftar Nih!</b>\n\n"
-                f"User <code>{target_id}</code> belum masuk ke sistem kita. "
-                f"Coba ajak doi kenalan terus suruh ketik <code>/register</code> dulu ya!",
+                f"❌ <b>TARGET TIDAK TERDAFTAR!</b>\n\n"
+                f"User <code>{target_id}</code> belum tercatat di registry kota. Suruh target mendaftar KTP via <code>/register</code> terlebih dahulu.",
                 parse_mode="HTML"
             )
 
         user_marriage = await get_active_marriage(db, user_id)
         if user_marriage:
             return await update.message.reply_text(
-                "💍 <b>Eits, Jangan Maruk Kak!</b>\n\n"
-                "Kakak kan udah menikah! Kalau mau lamar orang lain, harus cerai dulu pakai <code>/divorce</code>.",
+                "💍 <b>STATUS PERNIKAHAN MASIH AKTIF!</b>\n\n"
+                "Sistem menolak poligami ganda tanpa perceraian resmi. Putuskan hubungan aktif via <code>/divorce</code> terlebih dahulu.",
                 parse_mode="HTML"
             )
             
         target_marriage = await get_active_marriage(db, target_id)
         if target_marriage:
             return await update.message.reply_text(
-                f"💔 <b>Aduh, Telat Kak!</b>\n\n"
-                f"User <code>{target_id}</code> udah ada yang punya. Cari target lain yang masih jomblo ya~",
+                f"💔 <b>TARGET SUDAH TERIKAT PERSEKUTUAN!</b>\n\n"
+                f"Citizen ID <code>{target_id}</code> telah menjadi pasangan resmi pihak lain. Cari target aliansi yang masih lajang.",
                 parse_mode="HTML"
             )
 
         if await is_relative(db, user_id, target_id):
-            return await update.message.reply_text("🚫 <b>Ditolak Sistem:</b> Kakak tidak bisa melamar anggota keluarga kandung/relasi dekat sendiri ya!")
+            return await update.message.reply_text("🚫 <b>PERBEDAAN HUKUM KELUARGA:</b> Sistem menolak pernikahan antar anggota keluarga kandung/relasi terdekat!")
 
         since_epoch = int(time.time()) - 86400
         count_today = 0
@@ -1025,7 +1024,7 @@ async def cmd_propose(update: Update, context: ContextTypes.DEFAULT_TYPE):
             count_today = 0
 
         if count_today >= MAX_PROPOSALS_PER_DAY:
-            return await update.message.reply_text(f"🛑 Waduh, Kakak gercep banget! Udah kirim {MAX_PROPOSALS_PER_DAY} lamaran hari ini. Istirahat dulu, coba lagi besok ya!")
+            return await update.message.reply_text(f"🛑 Batas maksimum lamaran harian ({MAX_PROPOSALS_PER_DAY}x) telah tercapai. Harap tunggu esok hari.")
 
         has_pending = False
         try:
@@ -1038,7 +1037,7 @@ async def cmd_propose(update: Update, context: ContextTypes.DEFAULT_TYPE):
             has_pending = False
 
         if has_pending:
-            return await update.message.reply_text("⏳ Lamaran Kakak ke doi masih pending nih. Tunggu dijawab dulu ya~")
+            return await update.message.reply_text("⏳ Proposal lamaran Anda masih terikat status PENDING. Menunggu respons target.")
 
         now_epoch = int(time.time())
         expires_at = now_epoch + PROPOSAL_TTL_SECONDS
@@ -1051,12 +1050,13 @@ async def cmd_propose(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         target_name = await get_username(db, target_id)
         await update.message.reply_text(
-            f"💌 <b>CIE~ LAMARAN TERKIRIM!</b>\n\n"
-            f"Ditujukan ke: @{target_name} (<code>{target_id}</code>)\n"
-            f"💍 Tipe Pernikahan: <b>{m_type.capitalize()}</b>\n"
-            f"⏳ <b>Berlaku 10 menit ya!</b>\n\n"
-            f"Doi bisa terima pakai <code>/accept_proposal {user_id}</code>\n"
-            f"atau nolak pakai <code>/reject_proposal {user_id}</code>",
+            f"💌 <b>PROPOSAL LAMARAN DITERBITKAN!</b>\n\n"
+            f"Ditujukan ke : @{target_name} (<code>{target_id}</code>)\n"
+            f"💍 Tipe Akad : <b>{m_type.capitalize()}</b>\n"
+            f"⏳ Masa Berlaku: <b>10 Menit</b>\n\n"
+            f"Target dapat merespons dengan:\n"
+            f"• Terima: <code>/accept_proposal {user_id}</code>\n"
+            f"• Tolak: <code>/reject_proposal {user_id}</code>",
             parse_mode="HTML"
         )
 
@@ -1064,7 +1064,7 @@ async def cmd_accept_proposal(update: Update, context: ContextTypes.DEFAULT_TYPE
     user_id = update.effective_user.id
     proposer_id = parse_target_id(context)
     if proposer_id is None:
-        return await update.message.reply_text("💁‍♀️ Formatnya: <code>/accept_proposal [proposer_id]</code> ya Kak!", parse_mode="HTML")
+        return await update.message.reply_text("Format pengesahan: <code>/accept_proposal [proposer_id]</code>", parse_mode="HTML")
 
     async with get_db_connection() as db:
         await ensure_all_tables_exist(db)
@@ -1082,9 +1082,8 @@ async def cmd_accept_proposal(update: Update, context: ContextTypes.DEFAULT_TYPE
 
         if not proposal:
             return await update.message.reply_text(
-                f"💔 <b>Gak Ada Lamaran Masuk Nih Kak!</b>\n\n"
-                f"Tidak ada lamaran pending dari user <code>{proposer_id}</code>. "
-                f"Coba cek status Kakak pakai <code>/marriage_status</code>.",
+                f"💔 <b>TIDAK ADA LAMARAN PENDING!</b>\n\n"
+                f"Tidak ditemukan berkas lamaran aktif dari ID <code>{proposer_id}</code>. Cek status Anda di <code>/marriage_status</code>.",
                 parse_mode="HTML"
             )
 
@@ -1092,12 +1091,12 @@ async def cmd_accept_proposal(update: Update, context: ContextTypes.DEFAULT_TYPE
         if expires_at < now_epoch:
             await db.execute("UPDATE marriage_proposals SET status = 'expired' WHERE proposal_id = ?", (proposal_id,))
             await db.commit()
-            return await update.message.reply_text("⏳ Yah... Lamarannya udah kadaluarsa nih (timeout 10 menit). Minta doi buat lamar ulang ya!")
+            return await update.message.reply_text("⏳ Proposal lamaran telah kadaluarsa (melewati batas waktu 10 menit). Ajukan lamaran ulang.")
 
         if await get_active_marriage(db, user_id) or await get_active_marriage(db, proposer_id):
             await db.execute("UPDATE marriage_proposals SET status = 'rejected', responded_at = ? WHERE proposal_id = ?", (now_epoch, proposal_id))
             await db.commit()
-            return await update.message.reply_text("❌ Yah, salah satu dari kalian udah keburu menikah duluan nih. Lamaran otomatis dibatalkan.")
+            return await update.message.reply_text("❌ Salah satu pihak telah terikat dalam pernikahan lain. Proposal otomatis dibatalkan.")
 
         cert_number, sha_hash, date_formatted = generate_marriage_certificate(proposer_id, user_id)
         
@@ -1114,13 +1113,13 @@ async def cmd_accept_proposal(update: Update, context: ContextTypes.DEFAULT_TYPE
         proposer_name = await get_username(db, proposer_id)
         my_name = await get_username(db, user_id)
         await update.message.reply_text(
-            f"💒 <b>SELAMAT! PERNIKAHAN RESMI TERCATAT!</b>\n\n"
+            f"💒 <b>PERSEKUTUAN NIKAH RESMI DIESAHKAN!</b>\n\n"
             f"👰🤵 @{proposer_name} (<code>{proposer_id}</code>) ❤️ @{my_name} (<code>{user_id}</code>)\n"
-            f"📜 Sertifikat: <code>{cert_number}</code>\n"
-            f"💍 Tipe: <b>{m_type.capitalize()}</b>\n"
-            f"🗓️ {date_formatted}\n\n"
-            f"Semoga langgeng ya! Status KTP kalian otomatis diperbarui jadi Menikah.\n"
-            f"Ketik <code>/create_family [nama_keluarga]</code> untuk membentuk dinasti kalian!",
+            f"📜 No. Sertifikat: <code>{cert_number}</code>\n"
+            f"💍 Tipe Akad : <b>{m_type.capitalize()}</b>\n"
+            f"🗓️ Tanggal    : {date_formatted}\n\n"
+            f"Status KTP kedua belah pihak resmi diperbarui menjadi Menikah.\n"
+            f"Dirikan dinasti baru Anda via <code>/create_family [nama_keluarga]</code>!",
             parse_mode="HTML"
         )
 
@@ -1128,7 +1127,7 @@ async def cmd_reject_proposal(update: Update, context: ContextTypes.DEFAULT_TYPE
     user_id = update.effective_user.id
     proposer_id = parse_target_id(context)
     if proposer_id is None:
-        return await update.message.reply_text("💁‍♀️ Formatnya: <code>/reject_proposal [proposer_id]</code> ya Kak!", parse_mode="HTML")
+        return await update.message.reply_text("Format penolakan: <code>/reject_proposal [proposer_id]</code>", parse_mode="HTML")
 
     async with get_db_connection() as db:
         await ensure_all_tables_exist(db)
@@ -1144,11 +1143,11 @@ async def cmd_reject_proposal(update: Update, context: ContextTypes.DEFAULT_TYPE
         await db.commit()
         if cursor.rowcount == 0:
             return await update.message.reply_text(
-                f"💔 <b>Gak Ada Lamaran Masuk!</b>\n\n"
-                f"Tidak ada lamaran pending dari user <code>{proposer_id}</code>.",
+                f"💔 <b>TIDAK ADA LAMARAN AKTIF!</b>\n\n"
+                f"Tidak ada proposal lamaran dari Citizen ID <code>{proposer_id}</code>.",
                 parse_mode="HTML"
             )
-        await update.message.reply_text(f"💔 Lamaran dari <code>{proposer_id}</code> resmi ditolak. Jangan berkecil hati ya!", parse_mode="HTML")
+        await update.message.reply_text(f"💔 Proposal lamaran dari ID <code>{proposer_id}</code> resmi ditolak.", parse_mode="HTML")
 
 async def cmd_proposals_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -1167,13 +1166,13 @@ async def cmd_proposals_list(update: Update, context: ContextTypes.DEFAULT_TYPE)
             proposals = await cursor.fetchall()
 
         if not proposals:
-            return await update.message.reply_text("💌 Belum ada lamaran pending yang masuk untuk Kakak saat ini.", parse_mode="HTML")
+            return await update.message.reply_text("💌 Tidak ada proposal lamaran pending yang ditujukan kepada Anda saat ini.", parse_mode="HTML")
 
-        lines = ["💌 <b>DAFTAR LAMARAN MASUK (PENDING)</b>\n"]
+        lines = ["💌 <b>DAFTAR PROPOSAL LAMARAN (PENDING)</b>\n"]
         for p_id, prop_id, c_at, exp_at, p_type in proposals:
             prop_name = await get_username(db, prop_id)
             rem_sec = exp_at - now_epoch
-            lines.append(f"• Dari @{prop_name} (<code>{prop_id}</code>) [{p_type}] — Sisa: {rem_sec // 60}m {rem_sec % 60}s")
+            lines.append(f"• Dari @{prop_name} (<code>{prop_id}</code>) [{p_type}] — Sisa Waktu: {rem_sec // 60}m {rem_sec % 60}s")
             lines.append(f"  👉 Terima: <code>/accept_proposal {prop_id}</code>")
             lines.append(f"  👉 Tolak: <code>/reject_proposal {prop_id}</code>\n")
 
@@ -1190,7 +1189,7 @@ async def cmd_divorce(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         marriage = await get_active_marriage(db, user_id)
         if not marriage:
-            return await update.message.reply_text("💁‍♀️ Kakak kan belum menikah, mau cerai sama siapa coba? Bergaul dulu gih biar dapet pasangan!")
+            return await update.message.reply_text("🤔 Anda sedang dalam status Lajang. Tidak ada ikatan pernikahan untuk diputuskan.")
 
         marriage_id, cert_number, user_a, user_b, married_at, m_type = marriage
         partner_id = user_b if user_id == user_a else user_a
@@ -1213,15 +1212,15 @@ async def cmd_divorce(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             await db.execute("UPDATE users SET koin = ? WHERE user_id = ?", (half, user_a))
             await db.execute("UPDATE users SET koin = ? WHERE user_id = ?", (half, user_b))
-            split_msg = f"\n⚖️ <b>Harta Gono-Gini Dibagi Rata:</b> Total <b>{total_gono_gini:,} Koin</b> → Masing-masing mendapat <b>{half:,} Koin</b>."
+            split_msg = f"\n⚖️ <b>Harta Gono-Gini Dibagi Rata:</b> Total <b>{total_gono_gini:,} Koin</b> → Masing-masing dialokasikan <b>{half:,} Koin</b>."
 
         await db.commit()
 
         await update.message.reply_text(
-            f"💔 <b>PERCERAIAN RESMI TERCATAT</b>\n\n"
-            f"Pernikahan Kakak dengan @{partner_name} (<code>{partner_id}</code>) telah berakhir.\n"
-            f"Sertifikat: <code>{cert_number}</code>{split_msg}\n\n"
-            f"<i>Status KTP kembali ke Lajang. Yuk cari petualangan baru!</i> 🌟",
+            f"💔 <b>PERKARA PERCERAIAN DIESAHKAN</b>\n\n"
+            f"Pernikahan Anda dengan @{partner_name} (<code>{partner_id}</code>) resmi dibatalkan.\n"
+            f"Sertifikat Nikah: <code>{cert_number}</code>{split_msg}\n\n"
+            f"<i>Status KTP diperbarui kembali menjadi LAJANG.</i>",
             parse_mode="HTML"
         )
 
@@ -1235,9 +1234,8 @@ async def cmd_marriage_status(update: Update, context: ContextTypes.DEFAULT_TYPE
         marriage = await get_active_marriage(db, user_id)
         if not marriage:
             return await update.message.reply_text(
-                "💍 <b>Status: JOMBLO HAPPY</b>\n\n"
-                "Kakak belum punya pasangan nih! Yuk mulai bergaul di grup, atau gunakan "
-                "<code>/register_marriage [user_id]</code> jika kamu sudah punya pasangan nikah di RP! 💕",
+                "💍 <b>STATUS REKOR: LAJANG</b>\n\n"
+                "Anda tidak terikat pernikahan aktif. Bangun persekutuan nikah baru via <code>/propose [user_id]</code> atau daftarkan nikah lama via <code>/register_marriage</code>.",
                 parse_mode="HTML"
             )
 
@@ -1247,12 +1245,12 @@ async def cmd_marriage_status(update: Update, context: ContextTypes.DEFAULT_TYPE
         married_date = datetime.fromtimestamp(married_at, WIB).strftime("%d %B %Y, %H:%M WIB")
 
         await update.message.reply_text(
-            f"💍 <b>STATUS PERNIKAHAN RESMI</b>\n\n"
+            f"💍 <b>INFORMASI PERNIKAHAN AKTIF</b>\n\n"
             f"Pasangan: <b>@{partner_name}</b> (<code>{partner_id}</code>)\n"
             f"Sertifikat: <code>{cert_number}</code>\n"
-            f"Tipe Pernikahan: <b>{m_type.capitalize()}</b>\n"
-            f"Menikah sejak: {married_date}\n\n"
-            f"<i>Gunakan /anniversary buat cek milestone atau /divorce jika ingin berpisah.</i>",
+            f"Tipe Akad: <b>{m_type.capitalize()}</b>\n"
+            f"Terikat Sejak: {married_date}\n\n"
+            f"<i>Gunakan /anniversary untuk milestone persekutuan atau /divorce jika terjadi pembatalan ikatan.</i>",
             parse_mode="HTML"
         )
 
@@ -1265,7 +1263,7 @@ async def cmd_anniversary(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         marriage = await get_active_marriage(db, user_id)
         if not marriage:
-            return await update.message.reply_text("💍 Kakak kan masih jomblo, belum ada ulang tahun pernikahan nih!")
+            return await update.message.reply_text("💍 Anda sedang dalam status Lajang. Tidak ada anniversary pernikahan yang dapat dicatat.")
 
         marriage_id, cert_number, user_a, user_b, married_at, m_type = marriage
         partner_id = user_b if user_id == user_a else user_a
@@ -1274,20 +1272,19 @@ async def cmd_anniversary(update: Update, context: ContextTypes.DEFAULT_TYPE):
         now_epoch = int(time.time())
         days_together = (now_epoch - married_at) // 86400
 
-        badge = "🥉 Pernikahan Seumur Jagung"
+        badge = "🥉 Persekutuan Baru"
         if days_together >= 365:
-            badge = "💎 Pernikahan Emas (1+ Tahun)"
+            badge = "💎 Dinasti Emas (1+ Tahun)"
         elif days_together >= 100:
-            badge = "🥇 Pernikahan Perak (100+ Hari)"
+            badge = "🥇 Dinasti Perak (100+ Hari)"
         elif days_together >= 30:
-            badge = "🥈 Pernikahan Perunggu (1+ Bulan)"
+            badge = "🥈 Dinasti Perunggu (1+ Bulan)"
 
         await update.message.reply_text(
-            f"💖 <b>HAPPY ANNIVERSARY!</b>\n\n"
+            f"💖 <b>MILESTONE PERSEKUTUAN NIKAH</b>\n\n"
             f"Pasangan: @{partner_name} (<code>{partner_id}</code>)\n"
-            f"⏱️ Telah Bersama: <b>{days_together} Hari</b>\n"
-            f"🏆 Badge Hubungan: <b>{badge}</b>\n\n"
-            f"<i>Semoga makin langgeng dan mesra selalu ya! ✨</i>",
+            f"⏱️ Durasi Bersama: <b>{days_together} Hari</b>\n"
+            f"🏆 Badge Hirarki : <b>{badge}</b>",
             parse_mode="HTML"
         )
 
@@ -1300,7 +1297,7 @@ async def cmd_renew_vows(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         marriage = await get_active_marriage(db, user_id)
         if not marriage:
-            return await update.message.reply_text("💍 Hanya pasangan suami/istri sah yang bisa membaharui janji nikah!")
+            return await update.message.reply_text("💍 Hanya pasangan nikah aktif yang dapat memperbarui janji persekutuan.")
 
         marriage_id, cert_number, user_a, user_b, married_at, m_type = marriage
         partner_id = user_b if user_id == user_a else user_a
@@ -1308,9 +1305,9 @@ async def cmd_renew_vows(update: Update, context: ContextTypes.DEFAULT_TYPE):
         my_name = await get_username(db, user_id)
 
         await update.message.reply_text(
-            f"🕊️ <b>PEMBARUAN JANJI SUCI PERNIKAHAN</b>\n\n"
-            f" @{my_name} & @{partner_name} kembali menegaskan janji suci mereka untuk saling setia dan mencintai dalam suka maupun duka di Cosa Nostra! 💕✨\n\n"
-            f"📜 Sertifikat Nikah: <code>{cert_number}</code>",
+            f"🕊️ <b>PEMBARUAN JANJI PERSEKUTUAN NIKAH</b>\n\n"
+            f"@{my_name} & @{partner_name} menegaskan kembali komitmen dan janji kesetiaan mereka dalam jajaran Cosa Nostra Network! 🍷✨\n\n"
+            f"📜 Akta Terikat: <code>{cert_number}</code>",
             parse_mode="HTML"
         )
 
@@ -1331,7 +1328,7 @@ async def cmd_marriage_history(update: Update, context: ContextTypes.DEFAULT_TYP
             rows = await cursor.fetchall()
 
         if not rows:
-            return await update.message.reply_text("📜 Kakak belum punya riwayat mantan / perceraian sebelumnya.", parse_mode="HTML")
+            return await update.message.reply_text("📜 Rekor masa lalu bersih: Belum ada riwayat perceraian tercatat.", parse_mode="HTML")
 
         lines = ["📜 <b>RIWAYAT MANTAN PASANGAN (10 Terakhir)</b>\n"]
         for cert, u_a, u_b, m_at, d_at, reason in rows:
@@ -1348,13 +1345,13 @@ async def cmd_marriage_history(update: Update, context: ContextTypes.DEFAULT_TYP
 async def cmd_create_family(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not context.args:
-        return await update.message.reply_text("💁‍♀️ Format: <code>/create_family [nama keluarga]</code> ya Kak!", parse_mode="HTML")
+        return await update.message.reply_text("Gunakan format: <code>/create_family [nama keluarga]</code>", parse_mode="HTML")
 
     family_name = " ".join(context.args).strip()
     if not (3 <= len(family_name) <= 40):
-        return await update.message.reply_text("❌ Nama keluarga harus 3-40 karakter ya Kak.")
+        return await update.message.reply_text("❌ Nama dinasti keluarga harus berkisar 3-40 karakter.")
     if family_name.upper() in BLACKLISTED_FAMILY_NAMES:
-        return await update.message.reply_text("🚫 Waduh, nama keluarga ini terlarang/reserved system ya!")
+        return await update.message.reply_text("🚫 Nama keluarga terlarang/reserved system.")
 
     async with get_db_connection() as db:
         await ensure_all_tables_exist(db)
@@ -1362,7 +1359,7 @@ async def cmd_create_family(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         if await get_active_family_membership(db, user_id):
-            return await update.message.reply_text("❌ Kakak kan udah tergabung dalam sebuah keluarga. Keluar dulu kalau mau bikin baru!")
+            return await update.message.reply_text("❌ Anda telah tergabung dalam dinasti keluarga aktif. Keluar terlebih dahulu sebelum mendirikan keluarga baru.")
 
         try:
             now_epoch = int(time.time())
@@ -1379,9 +1376,9 @@ async def cmd_create_family(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             await db.commit()
         except aiosqlite.IntegrityError:
-            return await update.message.reply_text("❌ Nama keluarga ini udah dipakai. Cari nama lain yang lebih keren ya!")
+            return await update.message.reply_text("❌ Nama dinasti tersebut sudah dipatenkan oleh keluarga lain.")
 
-        await update.message.reply_text(f"🏛️ <b>KELUARGA \"{family_name}\" RESMI DIDIRIKAN!</b>\n\nSelamat Kak! Kakak sekarang jadi Kepala Keluarga (<code>head</code>).", parse_mode="HTML")
+        await update.message.reply_text(f"🏛️ <b>DINASTI KELUARGA \"{family_name}\" RESMI DIDIRIKAN!</b>\n\nSelamat! Anda resmi memegang posisi Kepala Keluarga (<code>head</code>).", parse_mode="HTML")
 
 async def cmd_family(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -1392,14 +1389,14 @@ async def cmd_family(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         membership = await get_active_family_membership(db, user_id)
         if not membership:
-            return await update.message.reply_text("💁‍♀️ Kakak belum masuk keluarga mana-mana nih. Bikin pakai <code>/create_family [nama]</code> atau ajak temen bergaul!", parse_mode="HTML")
+            return await update.message.reply_text("Anda belum menjadi anggota dinasti keluarga mana pun. Didirikan via <code>/create_family [nama]</code>.", parse_mode="HTML")
 
         family_id, relation_type, loyalty_score = membership
         async with db.execute("SELECT family_name, head_user_id, family_vault_balance, tax_rate_percent, is_locked FROM families WHERE family_id = ?", (family_id,)) as cursor:
             fam = await cursor.fetchone()
         
         if not fam:
-            return await update.message.reply_text("❌ Data keluarga tidak ditemukan.")
+            return await update.message.reply_text("❌ Data dinasti keluarga tidak ditemukan.")
             
         family_name, head_id, vault_balance, tax_rate, is_locked = fam
 
@@ -1409,12 +1406,12 @@ async def cmd_family(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ) as cursor:
             members = await cursor.fetchall()
 
-        lines = [f"🏛️ <b>KELUARGA {family_name.upper()}</b>{' 🔒' if is_locked else ''}\n"]
+        lines = [f"🏛️ <b>DINASTI {family_name.upper()}</b>{' 🔒' if is_locked else ''}\n"]
         head_name = await get_username(db, head_id)
         lines.append(f"👑 Kepala Keluarga: @{head_name} (<code>{head_id}</code>)")
-        lines.append(f"💰 Vault Keluarga: <b>{vault_balance:,} Koin</b>")
-        lines.append(f"📊 Pajak Keluarga: <b>{tax_rate}%</b>")
-        lines.append(f"\n<b>Anggota ({len(members)}):</b>")
+        lines.append(f"💰 Vault Dinasti : <b>{vault_balance:,} Koin</b>")
+        lines.append(f"📊 Tarif Pajak   : <b>{tax_rate}%</b>")
+        lines.append(f"\n<b>Anggota Aktif ({len(members)}):</b>")
         for m_id, m_rel, m_loyalty in members:
             m_name = await get_username(db, m_id)
             lines.append(f"• <code>{m_id}</code> (@{m_name}) — {m_rel} — Loyalty: {m_loyalty}")
@@ -1426,9 +1423,9 @@ async def _add_child(update: Update, context: ContextTypes.DEFAULT_TYPE, relatio
     child_id = parse_target_id(context)
     if child_id is None:
         cmd = "add_kandung" if relation_type == "biological" else "add_adopt"
-        return await update.message.reply_text(f"💁‍♀️ Format: <code>/{cmd} [user_id]</code> ya Kak!", parse_mode="HTML")
+        return await update.message.reply_text(f"Format: <code>/{cmd} [user_id]</code>", parse_mode="HTML")
     if child_id == user_id:
-        return await update.message.reply_text("😅 Nggak bisa jadiin diri sendiri sebagai anak dong Kak!")
+        return await update.message.reply_text("🤔 Tidak dapat mendaftarkan diri sendiri sebagai keturunan.")
 
     async with get_db_connection() as db:
         await ensure_all_tables_exist(db)
@@ -1437,20 +1434,20 @@ async def _add_child(update: Update, context: ContextTypes.DEFAULT_TYPE, relatio
 
         if not await user_exists(db, child_id):
             return await update.message.reply_text(
-                f"❌ <b>User {child_id} belum terdaftar</b>\n\n"
-                f"Ajak doi mendaftar dulu pakai <code>/register</code> ya!",
+                f"❌ <b>Target User {child_id} Belum Terdaftar</b>\n\n"
+                f"Arahkan target untuk mendaftar KTP via <code>/register</code>.",
                 parse_mode="HTML"
             )
 
         if await is_ancestor(db, child_id, user_id):
-            return await update.message.reply_text("🚫 Nggak bisa Kak, doi itu leluhur Kakak!")
+            return await update.message.reply_text("🚫 Ditolak: Target merupakan garis leluhur Anda!")
 
         async with db.execute(
             "SELECT 1 FROM parent_child_relations WHERE parent_id = ? AND child_id = ? AND is_active = 1",
             (user_id, child_id)
         ) as cursor:
             if await cursor.fetchone():
-                return await update.message.reply_text("❌ Relasi ini udah terdaftar Kak.")
+                return await update.message.reply_text("❌ Relasi keturunan ini sudah tercatat sebelumnya.")
 
         now_epoch = int(time.time())
         await db.execute(
@@ -1462,7 +1459,7 @@ async def _add_child(update: Update, context: ContextTypes.DEFAULT_TYPE, relatio
 
         label = "anak kandung" if relation_type == "biological" else "anak angkat"
         child_name = await get_username(db, child_id)
-        await update.message.reply_text(f"👶 @{child_name} (<code>{child_id}</code>) resmi tercatat sebagai <b>{label}</b> dari Kakak!", parse_mode="HTML")
+        await update.message.reply_text(f"👶 @{child_name} (<code>{child_id}</code>) resmi tercatat sebagai <b>{label}</b> dalam pendaftaran keluarga Anda!", parse_mode="HTML")
 
 async def cmd_add_kandung(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _add_child(update, context, "biological")
@@ -1474,7 +1471,7 @@ async def cmd_disown(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     child_id = parse_target_id(context)
     if child_id is None:
-        return await update.message.reply_text("💁‍♀️ Format: <code>/disown [user_id]</code> ya Kak!", parse_mode="HTML")
+        return await update.message.reply_text("Format: <code>/disown [user_id]</code>", parse_mode="HTML")
 
     reason = " ".join(context.args[1:]).strip() if len(context.args) > 1 else "Tidak disebutkan"
     async with get_db_connection() as db:
@@ -1490,9 +1487,9 @@ async def cmd_disown(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await db.commit()
         if cursor.rowcount == 0:
-            return await update.message.reply_text("❌ Tidak ditemukan relasi anak aktif dengan user tersebut.")
+            return await update.message.reply_text("❌ Tidak ditemukan relasi keturunan aktif dengan target ID tersebut.")
 
-        await update.message.reply_text(f"⚔️ <code>{child_id}</code> telah <b>didisown</b> dari keluarga.\nAlasan: {reason}", parse_mode="HTML")
+        await update.message.reply_text(f"⚔️ Citizen ID <code>{child_id}</code> resmi <b>didisown (dihapus dari silsilah)</b>.\nAlasan: {reason}", parse_mode="HTML")
 
 async def cmd_leave_family(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -1503,11 +1500,11 @@ async def cmd_leave_family(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         membership = await get_active_family_membership(db, user_id)
         if not membership:
-            return await update.message.reply_text("💁‍♀️ Kakak kan emang belum masuk keluarga mana-mana~")
+            return await update.message.reply_text("Anda belum tergabung dalam dinasti keluarga mana pun.")
 
         family_id, relation_type, loyalty_score = membership
         if relation_type == "head":
-            return await update.message.reply_text("🚫 Kepala keluarga nggak bisa keluar gitu aja Kak. Transfer dulu kepemimpinannya ya via <code>/transfer_head</code>!")
+            return await update.message.reply_text("🚫 Kepala Keluarga tidak dapat mengundurkan diri secara langsung. Alihkan kepemimpinan terlebih dahulu via <code>/transfer_head</code>!")
 
         now_epoch = int(time.time())
         await db.execute(
@@ -1515,7 +1512,7 @@ async def cmd_leave_family(update: Update, context: ContextTypes.DEFAULT_TYPE):
             (now_epoch, family_id, user_id)
         )
         await db.commit()
-        await update.message.reply_text("🚪 Kakak telah keluar dari keluarga secara sukarela.")
+        await update.message.reply_text("🚪 Anda resmi keluar dari dinasti keluarga secara sukarela.")
 
 async def cmd_betray(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -1526,7 +1523,7 @@ async def cmd_betray(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         membership = await get_active_family_membership(db, user_id)
         if not membership:
-            return await update.message.reply_text("💁‍♀️ Nggak ada keluarga yang bisa dikhianati Kak, Kakak kan jomblo/sendirian!")
+            return await update.message.reply_text("Tidak ada dinasti keluarga yang dapat dikhianati.")
 
         family_id, relation_type, loyalty_score = membership
         now_epoch = int(time.time())
@@ -1536,7 +1533,7 @@ async def cmd_betray(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await db.commit()
         await update.message.reply_text(
-            "🗡️ <b>PENGKHIANATAN TERCATAT.</b>\n\nKakak keluar dari keluarga dengan status <i>betrayed</i>. Loyalty direset ke 0!",
+            "🗡️ <b>TINDAKAN PENGKHIANATAN TERCATAT.</b>\n\nAnda membelot dari dinasti keluarga dengan status <i>betrayed</i>. Skor loyalty direset ke 0!",
             parse_mode="HTML"
         )
 
@@ -1549,13 +1546,13 @@ async def cmd_loyalty_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         if not await user_exists(db, target_id):
-            return await update.message.reply_text(f"❌ User {target_id} belum terdaftar.", parse_mode="HTML")
+            return await update.message.reply_text(f"❌ Target Citizen ID {target_id} tidak terdaftar.", parse_mode="HTML")
 
         membership = await get_active_family_membership(db, target_id)
         if not membership:
-            return await update.message.reply_text(f"💁‍♀️ User <code>{target_id}</code> belum punya keluarga Kak.", parse_mode="HTML")
+            return await update.message.reply_text(f"User ID <code>{target_id}</code> tidak memiliki dinasti aktif.", parse_mode="HTML")
         family_id, relation_type, loyalty_score = membership
-        await update.message.reply_text(f"🏆 Loyalty <code>{target_id}</code>: <b>{loyalty_score}/100</b> ({relation_type})", parse_mode="HTML")
+        await update.message.reply_text(f"🏆 Loyalitas Citizen ID <code>{target_id}</code>: <b>{loyalty_score}/100</b> ({relation_type})", parse_mode="HTML")
 
 async def cmd_family_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -1566,7 +1563,7 @@ async def cmd_family_history(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         membership = await get_active_family_membership(db, user_id)
         if not membership:
-            return await update.message.reply_text("💁‍♀️ Kakak belum gabung keluarga mana-mana.")
+            return await update.message.reply_text("Anda belum terikat dalam dinasti keluarga mana pun.")
         family_id = membership[0]
 
         async with db.execute(
@@ -1577,9 +1574,9 @@ async def cmd_family_history(update: Update, context: ContextTypes.DEFAULT_TYPE)
             rows = await cursor.fetchall()
 
         if not rows:
-            return await update.message.reply_text("📜 Belum ada riwayat anggota yang keluar dari keluarga ini.")
+            return await update.message.reply_text("📜 Belum ada catatan pengunduran diri / pengeluaran dari keluarga ini.")
 
-        lines = ["📜 <b>RIWAYAT KELUARGA (10 terakhir)</b>\n"]
+        lines = ["📜 <b>RIWAYAT LOG DINASTI (10 Terakhir)</b>\n"]
         for m_id, rel, reason, left_at in rows:
             left_date = datetime.fromtimestamp(left_at, WIB).strftime("%d %b %Y") if left_at else "-"
             m_name = await get_username(db, m_id)
@@ -1590,9 +1587,9 @@ async def cmd_add_sibling(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     sibling_id = parse_target_id(context)
     if sibling_id is None:
-        return await update.message.reply_text("💁‍♀️ Format: <code>/add_sibling [user_id] [biological|adopted]</code>", parse_mode="HTML")
+        return await update.message.reply_text("Format: <code>/add_sibling [user_id] [biological|adopted]</code>", parse_mode="HTML")
     if sibling_id == user_id:
-        return await update.message.reply_text("😅 Nggak bisa jadikan diri sendiri sebagai saudara ya Kak!")
+        return await update.message.reply_text("🤔 Tidak dapat mengangkat diri sendiri sebagai saudara.")
 
     sibling_type = "biological"
     if len(context.args) > 1 and context.args[1].lower() in ("biological", "adopted"):
@@ -1604,10 +1601,10 @@ async def cmd_add_sibling(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         if not await user_exists(db, sibling_id):
-            return await update.message.reply_text(f"❌ User {sibling_id} belum terdaftar.", parse_mode="HTML")
+            return await update.message.reply_text(f"❌ User ID {sibling_id} tidak terdaftar.", parse_mode="HTML")
 
         if await is_ancestor(db, sibling_id, user_id) or await is_ancestor(db, user_id, sibling_id):
-            return await update.message.reply_text("🚫 Tidak bisa: target adalah orang tua/anak Kakak.")
+            return await update.message.reply_text("🚫 Ditolak: Target merupakan garis keturunan / leluhur langsung Anda.")
 
         a_id, b_id = min(user_id, sibling_id), max(user_id, sibling_id)
         async with db.execute(
@@ -1615,7 +1612,7 @@ async def cmd_add_sibling(update: Update, context: ContextTypes.DEFAULT_TYPE):
             (a_id, b_id)
         ) as cursor:
             if await cursor.fetchone():
-                return await update.message.reply_text("❌ Relasi saudara ini udah tercatat Kak.")
+                return await update.message.reply_text("❌ Relasi saudara ini sudah terdaftar.")
 
         now_epoch = int(time.time())
         await db.execute(
@@ -1627,7 +1624,7 @@ async def cmd_add_sibling(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         label = "saudara kandung" if sibling_type == "biological" else "saudara angkat"
         sibling_name = await get_username(db, sibling_id)
-        await update.message.reply_text(f"👫 @{sibling_name} (<code>{sibling_id}</code>) resmi tercatat sebagai <b>{label}</b> dari Kakak!", parse_mode="HTML")
+        await update.message.reply_text(f"👫 @{sibling_name} (<code>{sibling_id}</code>) resmi terdaftar sebagai <b>{label}</b> Anda!", parse_mode="HTML")
 
 async def cmd_siblings(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -1645,9 +1642,9 @@ async def cmd_siblings(update: Update, context: ContextTypes.DEFAULT_TYPE):
             rows = await cursor.fetchall()
 
         if not rows:
-            return await update.message.reply_text(f"👫 User <code>{target_id}</code> belum punya saudara tercatat.", parse_mode="HTML")
+            return await update.message.reply_text(f"👫 Citizen ID <code>{target_id}</code> belum memiliki saudara yang tercatat.", parse_mode="HTML")
 
-        lines = [f"👫 <b>SAUDARA DARI <code>{target_id}</code></b>\n"]
+        lines = [f"👫 <b>GARIS SAUDARA UNTUK ID <code>{target_id}</code></b>\n"]
         for a_id, b_id, s_type in rows:
             other_id = b_id if a_id == target_id else a_id
             other_name = await get_username(db, other_id)
@@ -1659,9 +1656,9 @@ async def cmd_godparent(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     godparent_id = parse_target_id(context)
     if godparent_id is None:
-        return await update.message.reply_text("💁‍♀️ Format: <code>/godparent [user_id]</code> ya Kak!", parse_mode="HTML")
+        return await update.message.reply_text("Format: <code>/godparent [user_id]</code>", parse_mode="HTML")
     if godparent_id == user_id:
-        return await update.message.reply_text("❌ Nggak bisa jadi godparent diri sendiri Kak.")
+        return await update.message.reply_text("❌ Tidak dapat menunjuk diri sendiri sebagai Godparent.")
 
     async with get_db_connection() as db:
         await ensure_all_tables_exist(db)
@@ -1669,14 +1666,14 @@ async def cmd_godparent(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         if not await user_exists(db, godparent_id):
-            return await update.message.reply_text(f"❌ User {godparent_id} belum terdaftar.", parse_mode="HTML")
+            return await update.message.reply_text(f"❌ User ID {godparent_id} belum terdaftar.", parse_mode="HTML")
 
         async with db.execute(
             "SELECT 1 FROM godparent_relations WHERE godparent_id = ? AND godchild_id = ? AND is_active = 1",
             (godparent_id, user_id)
         ) as cursor:
             if await cursor.fetchone():
-                return await update.message.reply_text("❌ Relasi godparent ini udah tercatat.")
+                return await update.message.reply_text("❌ Relasi Godparent ini sudah aktif.")
 
         now_epoch = int(time.time())
         await db.execute(
@@ -1688,8 +1685,8 @@ async def cmd_godparent(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         gp_name = await get_username(db, godparent_id)
         await update.message.reply_text(
-            f"🕯️ @{gp_name} (<code>{godparent_id}</code>) resmi ditunjuk sebagai <b>godparent</b> Kakak!\n"
-            f"<i>(Catatan: godparent bukan ahli waris otomatis — kalau mau, atur manual lewat <code>/will</code> ya.)</i>",
+            f"🕯️ @{gp_name} (<code>{godparent_id}</code>) resmi diangkat sebagai <b>Godparent</b> Anda!\n"
+            f"<i>(Godparent bukan ahli waris otomatis — atur pembagian hak waris via <code>/will</code>).</i>",
             parse_mode="HTML"
         )
 
@@ -1697,7 +1694,7 @@ async def cmd_revoke_godparent(update: Update, context: ContextTypes.DEFAULT_TYP
     user_id = update.effective_user.id
     godparent_id = parse_target_id(context)
     if godparent_id is None:
-        return await update.message.reply_text("💁‍♀️ Format: <code>/revoke_godparent [user_id]</code>", parse_mode="HTML")
+        return await update.message.reply_text("Format: <code>/revoke_godparent [user_id]</code>", parse_mode="HTML")
 
     async with get_db_connection() as db:
         await ensure_all_tables_exist(db)
@@ -1712,8 +1709,8 @@ async def cmd_revoke_godparent(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         await db.commit()
         if cursor.rowcount == 0:
-            return await update.message.reply_text("❌ Tidak ditemukan relasi godparent aktif dengan user tersebut.")
-        await update.message.reply_text(f"🕯️ Status godparent <code>{godparent_id}</code> telah dicabut.", parse_mode="HTML")
+            return await update.message.reply_text("❌ Tidak ditemukan relasi Godparent aktif dengan target tersebut.")
+        await update.message.reply_text(f"🕯️ Status Godparent <code>{godparent_id}</code> telah dicabut.", parse_mode="HTML")
 
 async def cmd_my_godchildren(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -1729,9 +1726,9 @@ async def cmd_my_godchildren(update: Update, context: ContextTypes.DEFAULT_TYPE)
             rows = await cursor.fetchall()
 
         if not rows:
-            return await update.message.reply_text("🕯️ Kakak belum jadi godparent siapa-siapa.")
+            return await update.message.reply_text("🕯️ Anda belum ditunjuk sebagai Godparent oleh Citizen mana pun.")
 
-        lines = ["🕯️ <b>GODCHILDREN ANDA</b>\n"]
+        lines = ["🕯️ <b>DAFTAR GODCHILDREN ANDA</b>\n"]
         for r in rows:
             gc_name = await get_username(db, r[0])
             lines.append(f"• @{gc_name} (<code>{r[0]}</code>)")
@@ -1746,7 +1743,7 @@ async def cmd_in_laws(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         marriage = await get_active_marriage(db, user_id)
         if not marriage:
-            return await update.message.reply_text("💁‍♀️ Kakak belum menikah, jadi belum punya keluarga mertua/in-laws. Cari pasangan dulu ya!")
+            return await update.message.reply_text("Anda belum menikah. Relasi mertua/in-laws hanya berlaku bagi yang memiliki pasangan resmi.")
 
         marriage_id, cert_number, user_a, user_b, married_at, m_type = marriage
         spouse_id = user_b if user_id == user_a else user_a
@@ -1755,19 +1752,19 @@ async def cmd_in_laws(update: Update, context: ContextTypes.DEFAULT_TYPE):
         spouse_family = await get_active_family_membership(db, spouse_id)
         own_family = await get_active_family_membership(db, user_id)
 
-        lines = [f"👪 <b>IN-LAWS (KELUARGA PASANGAN @{spouse_name})</b>\n"]
+        lines = [f"👪 <b>RELASI IN-LAWS (DINASTI PASANGAN @{spouse_name})</b>\n"]
 
         if own_family and spouse_family and own_family[0] == spouse_family[0]:
-            lines.append("Kakak & pasangan udah ada di satu keluarga besar yang sama!")
+            lines.append("Anda dan pasangan berada dalam dinasti keluarga besar yang sama!")
         elif not spouse_family:
-            lines.append("Pasangan Kakak belum gabung ke keluarga mana-mana.")
+            lines.append("Pasangan Anda belum bergabung dengan dinasti keluarga mana pun.")
         else:
             spouse_family_id = spouse_family[0]
             async with db.execute("SELECT family_name, head_user_id FROM families WHERE family_id = ?", (spouse_family_id,)) as cursor:
                 fam = await cursor.fetchone()
             family_name, head_id = fam
             head_name = await get_username(db, head_id)
-            lines.append(f"Keluarga: <b>{family_name}</b>")
+            lines.append(f"Dinasti: <b>{family_name}</b>")
             lines.append(f"Mertua/Kepala Keluarga: <b>@{head_name}</b> (<code>{head_id}</code>)")
 
             async with db.execute(
@@ -1776,7 +1773,7 @@ async def cmd_in_laws(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ) as cursor:
                 members = await cursor.fetchall()
             if members:
-                lines.append("\n<b>Ipar/anggota lain:</b>")
+                lines.append("\n<b>Anggota Ipar/Lainnya:</b>")
                 for m_id, m_rel in members:
                     m_name = await get_username(db, m_id)
                     lines.append(f"• @{m_name} (<code>{m_id}</code>) ({m_rel})")
@@ -1789,11 +1786,11 @@ async def cmd_in_laws(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_deposit_vault(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not context.args or not context.args[0].isdigit():
-        return await update.message.reply_text("💁‍♀️ Format: <code>/deposit_vault [jumlah_koin]</code>", parse_mode="HTML")
+        return await update.message.reply_text("Format: <code>/deposit_vault [jumlah_koin]</code>", parse_mode="HTML")
 
     amount = int(context.args[0])
     if amount <= 0:
-        return await update.message.reply_text("❌ Jumlah koin harus lebih besar dari 0 Kak.")
+        return await update.message.reply_text("❌ Jumlah deposit koin harus bernilai positif.")
 
     async with get_db_connection() as db:
         await ensure_all_tables_exist(db)
@@ -1802,33 +1799,33 @@ async def cmd_deposit_vault(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         membership = await get_active_family_membership(db, user_id)
         if not membership:
-            return await update.message.reply_text("❌ Kakak belum bergabung dengan keluarga mana pun.")
+            return await update.message.reply_text("❌ Anda belum tergabung dalam dinasti keluarga mana pun.")
 
         family_id = membership[0]
 
         async with db.execute("SELECT is_locked FROM families WHERE family_id = ?", (family_id,)) as cursor:
             fam = await cursor.fetchone()
             if fam and fam[0] == 1:
-                return await update.message.reply_text("🔒 Vault keluarga sedang dikunci oleh Administrator.")
+                return await update.message.reply_text("🔒 Vault dinasti dikunci oleh Administrator.")
 
         user_koin = await get_koin(db, user_id)
         if user_koin < amount:
-            return await update.message.reply_text(f"❌ Koin Kakak kurang! Saldo dompet Kakak cuma <b>{user_koin:,} Koin</b>.", parse_mode="HTML")
+            return await update.message.reply_text(f"❌ Saldo dompet Anda tidak mencukupi! (Saldo saat ini: <b>{user_koin:,} Koin</b>).", parse_mode="HTML")
 
         await add_koin(db, user_id, -amount)
         await db.execute("UPDATE families SET family_vault_balance = family_vault_balance + ? WHERE family_id = ?", (amount, family_id))
         await db.commit()
 
-        await update.message.reply_text(f"💰 Berhasil menyetor <b>{amount:,} Koin</b> ke Vault Keluarga!", parse_mode="HTML")
+        await update.message.reply_text(f"💰 Berhasil mendepositkan <b>{amount:,} Koin</b> ke Vault Dinasti Keluarga!", parse_mode="HTML")
 
 async def cmd_withdraw_vault(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not context.args or not context.args[0].isdigit():
-        return await update.message.reply_text("💁‍♀️ Format: <code>/withdraw_vault [jumlah_koin]</code>", parse_mode="HTML")
+        return await update.message.reply_text("Format: <code>/withdraw_vault [jumlah_koin]</code>", parse_mode="HTML")
 
     amount = int(context.args[0])
     if amount <= 0:
-        return await update.message.reply_text("❌ Jumlah koin harus lebih besar dari 0 Kak.")
+        return await update.message.reply_text("❌ Penarikan dana harus bernilai positif.")
 
     async with get_db_connection() as db:
         await ensure_all_tables_exist(db)
@@ -1837,39 +1834,39 @@ async def cmd_withdraw_vault(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         membership = await get_active_family_membership(db, user_id)
         if not membership:
-            return await update.message.reply_text("❌ Kakak belum bergabung dengan keluarga mana pun.")
+            return await update.message.reply_text("❌ Anda belum tergabung dalam dinasti keluarga mana pun.")
 
         family_id, relation_type, _ = membership
         if relation_type != "head":
-            return await update.message.reply_text("🚫 Penarikan dana kas keluarga hanya bisa dilakukan oleh Kepala Keluarga (<code>head</code>).", parse_mode="HTML")
+            return await update.message.reply_text("🚫 Otoritas Terbatas: Penarikan dana kas dinasti hanya dapat dilakukan oleh Kepala Keluarga (<code>head</code>).", parse_mode="HTML")
 
         async with db.execute("SELECT family_vault_balance, is_locked FROM families WHERE family_id = ?", (family_id,)) as cursor:
             fam = await cursor.fetchone()
 
         if not fam:
-            return await update.message.reply_text("❌ Data keluarga tidak ditemukan.")
+            return await update.message.reply_text("❌ Data dinasti keluarga tidak ditemukan.")
 
         vault_balance, is_locked = fam
         if is_locked == 1:
-            return await update.message.reply_text("🔒 Vault keluarga sedang dikunci oleh Administrator.")
+            return await update.message.reply_text("🔒 Vault dinasti sedang dikunci oleh Administrator.")
 
         if vault_balance < amount:
-            return await update.message.reply_text(f"❌ Kas Vault Keluarga tidak mencukupi! Saldo vault cuma <b>{vault_balance:,} Koin</b>.", parse_mode="HTML")
+            return await update.message.reply_text(f"❌ Kas Vault Dinasti tidak mencukupi! Saldo vault saat ini: <b>{vault_balance:,} Koin</b>.", parse_mode="HTML")
 
         await db.execute("UPDATE families SET family_vault_balance = family_vault_balance - ? WHERE family_id = ?", (amount, family_id))
         await add_koin(db, user_id, amount)
         await db.commit()
 
-        await update.message.reply_text(f"💸 Berhasil menarik <b>{amount:,} Koin</b> dari Vault Keluarga ke dompet Kakak!", parse_mode="HTML")
+        await update.message.reply_text(f"💸 Berhasil menarik <b>{amount:,} Koin</b> dari Vault Dinasti ke rekening pribadi!", parse_mode="HTML")
 
 async def cmd_set_family_tax(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not context.args or not context.args[0].replace('.', '', 1).isdigit():
-        return await update.message.reply_text("💁‍♀️ Format: <code>/set_family_tax [persen_0_sampai_100]</code>", parse_mode="HTML")
+        return await update.message.reply_text("Format: <code>/set_family_tax [0-100]</code>", parse_mode="HTML")
 
     tax_rate = float(context.args[0])
     if not (0.0 <= tax_rate <= 100.0):
-        return await update.message.reply_text("❌ Persentase pajak harus di antara 0% sampai 100%.")
+        return await update.message.reply_text("❌ Persentase tarif pajak harus berada di kisaran 0% hingga 100%.")
 
     async with get_db_connection() as db:
         await ensure_all_tables_exist(db)
@@ -1878,22 +1875,22 @@ async def cmd_set_family_tax(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         membership = await get_active_family_membership(db, user_id)
         if not membership or membership[1] != "head":
-            return await update.message.reply_text("🚫 Pengaturan pajak keluarga hanya bisa diatur oleh Kepala Keluarga.", parse_mode="HTML")
+            return await update.message.reply_text("🚫 Pengaturan pajak dinasti hanya dapat ditetapkan oleh Kepala Keluarga.", parse_mode="HTML")
 
         family_id = membership[0]
         await db.execute("UPDATE families SET tax_rate_percent = ? WHERE family_id = ?", (tax_rate, family_id))
         await db.commit()
 
-        await update.message.reply_text(f"📊 Tarif pajak keluarga berhasil diperbarui menjadi <b>{tax_rate}%</b>.", parse_mode="HTML")
+        await update.message.reply_text(f"📊 Tarif pajak operasional dinasti diperbarui menjadi <b>{tax_rate}%</b>.", parse_mode="HTML")
 
 async def cmd_transfer_head(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     target_id = parse_target_id(context)
     if target_id is None:
-        return await update.message.reply_text("💁‍♀️ Format: <code>/transfer_head [user_id_penerus]</code>", parse_mode="HTML")
+        return await update.message.reply_text("Format: <code>/transfer_head [user_id_penerus]</code>", parse_mode="HTML")
 
     if target_id == user_id:
-        return await update.message.reply_text("😅 Kakak kan udah jadi Kepala Keluarga!")
+        return await update.message.reply_text("🤔 Anda sudah memegang kepemimpinan tertinggi dinasti saat ini.")
 
     async with get_db_connection() as db:
         await ensure_all_tables_exist(db)
@@ -1902,13 +1899,13 @@ async def cmd_transfer_head(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         membership = await get_active_family_membership(db, user_id)
         if not membership or membership[1] != "head":
-            return await update.message.reply_text("🚫 Hanya Kepala Keluarga yang dapat mentransfer kepemimpinan.", parse_mode="HTML")
+            return await update.message.reply_text("🚫 Hanya Kepala Keluarga yang dapat mengalihkan kepemimpinan.", parse_mode="HTML")
 
         family_id = membership[0]
 
         target_membership = await get_active_family_membership(db, target_id)
         if not target_membership or target_membership[0] != family_id:
-            return await update.message.reply_text("❌ Target bukan anggota aktif dari keluarga Kakak.")
+            return await update.message.reply_text("❌ Target penerus bukan anggota aktif dari dinasti keluarga Anda.")
 
         await db.execute("UPDATE families SET head_user_id = ? WHERE family_id = ?", (target_id, family_id))
         await db.execute("UPDATE family_members SET relation_type = 'member' WHERE family_id = ? AND user_id = ?", (family_id, user_id))
@@ -1917,7 +1914,7 @@ async def cmd_transfer_head(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         target_name = await get_username(db, target_id)
         await update.message.reply_text(
-            f"👑 <b>TAHTA DITERUSKAN!</b>\n\nSelamat kepada @{target_name} (<code>{target_id}</code>) yang kini resmi menjadi Kepala Keluarga!",
+            f"👑 <b>TAKHTA KEPEMIMPINAN DIALIHKAN!</b>\n\nSelamat kepada @{target_name} (<code>{target_id}</code>) yang kini memegang takhta Kepala Keluarga!",
             parse_mode="HTML"
         )
 
@@ -1925,12 +1922,12 @@ async def cmd_kick_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     target_id = parse_target_id(context)
     if target_id is None:
-        return await update.message.reply_text("💁‍♀️ Format: <code>/kick_member [user_id] [alasan]</code>", parse_mode="HTML")
+        return await update.message.reply_text("Format: <code>/kick_member [user_id] [alasan]</code>", parse_mode="HTML")
 
     if target_id == user_id:
-        return await update.message.reply_text("😅 Mau ngeluarin diri sendiri? Gunakan <code>/leave_family</code> aja Kak!")
+        return await update.message.reply_text("Gunakan <code>/leave_family</code> jika ingin mengundurkan diri.")
 
-    reason = " ".join(context.args[1:]).strip() if len(context.args) > 1 else "Dikeluarkan oleh Head"
+    reason = " ".join(context.args[1:]).strip() if len(context.args) > 1 else "Keputusan Kepala Keluarga"
 
     async with get_db_connection() as db:
         await ensure_all_tables_exist(db)
@@ -1944,7 +1941,7 @@ async def cmd_kick_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
         family_id = membership[0]
         target_membership = await get_active_family_membership(db, target_id)
         if not target_membership or target_membership[0] != family_id:
-            return await update.message.reply_text("❌ Target bukan anggota aktif di keluarga Kakak.")
+            return await update.message.reply_text("❌ Target bukan anggota aktif di dinasti Anda.")
 
         now_epoch = int(time.time())
         await db.execute(
@@ -1954,7 +1951,7 @@ async def cmd_kick_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await db.commit()
 
         target_name = await get_username(db, target_id)
-        await update.message.reply_text(f"👞 @{target_name} (<code>{target_id}</code>) telah dikeluarkan dari keluarga.\nAlasan: {reason}", parse_mode="HTML")
+        await update.message.reply_text(f"👞 @{target_name} (<code>{target_id}</code>) telah dikeluarkan dari dinasti.\nAlasan: {reason}", parse_mode="HTML")
 
 # ==========================================
 # INHERITANCE / WILL COMMANDS
@@ -1963,7 +1960,7 @@ async def cmd_will(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not context.args:
         return await update.message.reply_text(
-            "📜 <b>Format Surat Wasiat:</b>\n\n"
+            "📜 <b>FORMAT DOKUMEN WASIAT:</b>\n\n"
             "<code>/will [user_id]:[persen] [user_id]:[persen] ...</code>\n\n"
             "Contoh:\n<code>/will 123456789:50 987654321:30</code>",
             parse_mode="HTML"
@@ -1973,24 +1970,24 @@ async def cmd_will(update: Update, context: ContextTypes.DEFAULT_TYPE):
     total_percent = 0.0
     for arg in context.args:
         if ":" not in arg:
-            return await update.message.reply_text(f"❌ Format nggak valid: <code>{arg}</code>. Gunakan <code>[user_id]:[persen]</code>", parse_mode="HTML")
+            return await update.message.reply_text(f"❌ Format penulisan salah: <code>{arg}</code>. Gunakan <code>[user_id]:[persen]</code>", parse_mode="HTML")
         b_id_str, pct_str = arg.split(":", 1)
         if not b_id_str.isdigit():
-            return await update.message.reply_text(f"❌ Format nggak valid: <code>{arg}</code>", parse_mode="HTML")
+            return await update.message.reply_text(f"❌ Target ID harus berupa angka: <code>{arg}</code>", parse_mode="HTML")
         try:
             pct = float(pct_str)
         except ValueError:
             return await update.message.reply_text(f"❌ Persentase harus angka: <code>{arg}</code>", parse_mode="HTML")
         b_id = int(b_id_str)
         if b_id == user_id:
-            return await update.message.reply_text("😅 Nggak bisa kasih wasiat ke diri sendiri Kak!")
+            return await update.message.reply_text("🤔 Tidak dapat membagikan hak waris kepada diri sendiri.")
         if pct <= 0:
-            return await update.message.reply_text("❌ Persentase harus lebih dari 0.")
+            return await update.message.reply_text("❌ Nilai persentase warisan harus positif.")
         beneficiaries.append((b_id, pct))
         total_percent += pct
 
     if total_percent > 100:
-        return await update.message.reply_text(f"❌ Total persentase {total_percent:.1f}% melebihi 100% Kak!", parse_mode="HTML")
+        return await update.message.reply_text(f"❌ Akumulasi alokasi ({total_percent:.1f}%) melebihi kuota 100%!", parse_mode="HTML")
 
     async with get_db_connection() as db:
         await ensure_all_tables_exist(db)
@@ -2004,7 +2001,7 @@ async def cmd_will(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if unregistered:
             unregistered_str = "\n   ".join(unregistered)
-            return await update.message.reply_text(f"❌ Beneficiary belum terdaftar:\n   {unregistered_str}", parse_mode="HTML")
+            return await update.message.reply_text(f"❌ Penerima waris belum terdaftar di registry:\n   {unregistered_str}", parse_mode="HTML")
 
         now_epoch = int(time.time())
         async with db.execute("SELECT will_id FROM wills WHERE owner_id = ?", (user_id,)) as cursor:
@@ -2028,24 +2025,24 @@ async def cmd_will(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         await db.commit()
 
-        lines = ["📜 <b>SURAT WASIAT DIPERBARUI ✅</b>\n"]
+        lines = ["📜 <b>SURAT WASIAT WARIS RESMI DIPERBARUI ✅</b>\n"]
         for b_id, pct in beneficiaries:
             b_name = await get_username(db, b_id)
             lines.append(f"• @{b_name} (<code>{b_id}</code>) — {pct}%")
         
         remaining_pct = 100 - total_percent
         if remaining_pct > 0:
-            lines.append(f"\n⚠️ Sisa: {remaining_pct:.1f}% (tidak dialokasikan)")
-        lines.append("\n💾 Wasiat disimpan dan siap dieksekusi dengan <code>/retire</code>")
+            lines.append(f"\n⚠️ Sisa Kuota Unallocated: {remaining_pct:.1f}%")
+        lines.append("\n💾 Dokumen tersimpan dan siap dieksekusi via <code>/retire</code>.")
         await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_appoint_heir(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     heir_id = parse_target_id(context)
     if heir_id is None:
-        return await update.message.reply_text("⚰️ Format: <code>/appoint_heir [user_id]</code>", parse_mode="HTML")
+        return await update.message.reply_text("Format: <code>/appoint_heir [user_id]</code>", parse_mode="HTML")
     if heir_id == user_id:
-        return await update.message.reply_text("❌ Nggak bisa angkat diri sendiri jadi ahli waris.")
+        return await update.message.reply_text("❌ Tidak dapat menunjuk diri sendiri sebagai ahli waris tunggal.")
 
     async with get_db_connection() as db:
         await ensure_all_tables_exist(db)
@@ -2053,7 +2050,7 @@ async def cmd_appoint_heir(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         if not await user_exists(db, heir_id):
-            return await update.message.reply_text(f"❌ User {heir_id} belum terdaftar.", parse_mode="HTML")
+            return await update.message.reply_text(f"❌ User ID {heir_id} belum terdaftar.", parse_mode="HTML")
 
     context.args = [f"{heir_id}:100"]
     await cmd_will(update, context)
@@ -2068,26 +2065,26 @@ async def cmd_will_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         async with db.execute("SELECT will_id, status, updated_at, executed_at FROM wills WHERE owner_id = ?", (user_id,)) as cursor:
             will = await cursor.fetchone()
         if not will:
-            return await update.message.reply_text("📜 Kakak belum punya surat wasiat. Atur pakai <code>/will</code> atau <code>/appoint_heir</code> ya!", parse_mode="HTML")
+            return await update.message.reply_text("📜 Belum ada dokumen wasiat yang diterbitkan. Atur alokasi via <code>/will</code> atau <code>/appoint_heir</code>.", parse_mode="HTML")
 
         will_id, status, updated_at, executed_at = will
         async with db.execute("SELECT beneficiary_id, percent FROM will_beneficiaries WHERE will_id = ?", (will_id,)) as cursor:
             rows = await cursor.fetchall()
 
         if not rows:
-            return await update.message.reply_text("📜 Surat Wasiat Kakak masih KOSONG.", parse_mode="HTML")
+            return await update.message.reply_text("📜 Dokumen wasiat Anda masih kosong.", parse_mode="HTML")
 
         status_label = "EXECUTED" if status == "executed" else "ACTIVE"
-        lines = [f"📜 <b>SURAT WASIAT — Status: {status_label}</b>\n"]
+        lines = [f"📜 <b>DOKUMEN WASIAT — Status: {status_label}</b>\n"]
         for b_id, pct in rows:
             b_name = await get_username(db, b_id)
             lines.append(f"• @{b_name} (<code>{b_id}</code>) — {pct}%")
             
         if executed_at:
             exec_date = datetime.fromtimestamp(executed_at, WIB).strftime("%d %B %Y, %H:%M WIB")
-            lines.append(f"\n✅ <b>SUDAH DIEKSEKUSI pada:</b> {exec_date}")
+            lines.append(f"\n✅ <b>TELAH DIEKSEKUSI PADA:</b> {exec_date}")
         else:
-            lines.append("\n💾 Gunakan <code>/retire</code> untuk mengeksekusi wasiat ini atau <code>/cancel_will</code> untuk membatalkan.")
+            lines.append("\n💾 Ketik <code>/retire</code> untuk mengeksekusi wasiat ini atau <code>/cancel_will</code> untuk membatalkan.")
             
         await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
@@ -2102,17 +2099,17 @@ async def cmd_cancel_will(update: Update, context: ContextTypes.DEFAULT_TYPE):
             will = await cursor.fetchone()
 
         if not will:
-            return await update.message.reply_text("📜 Kakak memang belum memiliki surat wasiat.")
+            return await update.message.reply_text("📜 Anda tidak memiliki dokumen wasiat aktif.")
 
         will_id, status = will
         if status == "executed":
-            return await update.message.reply_text("❌ Surat wasiat yang sudah dieksekusi tidak dapat dibatalkan.")
+            return await update.message.reply_text("❌ Dokumen wasiat yang telah dieksekusi tidak dapat dibatalkan.")
 
         await db.execute("DELETE FROM will_beneficiaries WHERE will_id = ?", (will_id,))
         await db.execute("DELETE FROM wills WHERE will_id = ?", (will_id,))
         await db.commit()
 
-        await update.message.reply_text("🗑️ Surat wasiat Kakak telah resmi dibatalkan dan dihapus.", parse_mode="HTML")
+        await update.message.reply_text("🗑️ Dokumen wasiat resmi dibatalkan dan dimusnahkan dari arsip.", parse_mode="HTML")
 
 async def cmd_retire(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -2124,20 +2121,20 @@ async def cmd_retire(update: Update, context: ContextTypes.DEFAULT_TYPE):
         async with db.execute("SELECT will_id, status FROM wills WHERE owner_id = ?", (user_id,)) as cursor:
             will = await cursor.fetchone()
         if not will:
-            return await update.message.reply_text("❌ Kakak belum punya surat wasiat.", parse_mode="HTML")
+            return await update.message.reply_text("❌ Anda belum menerbitkan dokumen wasiat.", parse_mode="HTML")
 
         will_id, status = will
         if status == "executed":
-            return await update.message.reply_text("❌ Surat wasiat ini udah pernah dieksekusi sebelumnya.")
+            return await update.message.reply_text("❌ Dokumen wasiat ini telah dieksekusi sebelumnya.")
 
         async with db.execute("SELECT beneficiary_id, percent FROM will_beneficiaries WHERE will_id = ?", (will_id,)) as cursor:
             beneficiaries = await cursor.fetchall()
         if not beneficiaries:
-            return await update.message.reply_text("❌ Surat wasiat Kakak masih kosong.", parse_mode="HTML")
+            return await update.message.reply_text("❌ Alokasi dokumen wasiat Anda masih kosong.", parse_mode="HTML")
 
         total_koin = await get_koin(db, user_id)
         if total_koin <= 0:
-            return await update.message.reply_text("❌ Saldo Kakak 0 Koin, nggak ada yang bisa diwarisin nih!", parse_mode="HTML")
+            return await update.message.reply_text("❌ Saldo likuid Anda 0 Koin. Tidak ada aset likuid yang dapat diwariskan.", parse_mode="HTML")
 
         now_epoch = int(time.time())
         distributed_lines = []
@@ -2163,11 +2160,11 @@ async def cmd_retire(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await db.commit()
 
         text = (
-            "⚰️ <b>WASIAT BERHASIL DIEKSEKUSI (RETIRE)</b>\n\n"
+            "⚰️ <b>PROSES EKSEKUSI WASIAT (PENSIUN) BERHASIL!</b>\n\n"
             + "\n".join(distributed_lines)
-            + f"\n\n💰 Total diwariskan: <b>{total_distributed:,} Koin</b>"
-            + f"\n💾 Sisa di rekening Kakak: <b>{remaining:,} Koin</b>"
-            + "\n\n✅ <i>Proses retire selesai. Selamat menikmati masa pensiun Kak!</i>"
+            + f"\n\n💰 Total Aset Diwariskan: <b>{total_distributed:,} Koin</b>"
+            + f"\n💾 Sisa Saldo Tersimpan : <b>{remaining:,} Koin</b>"
+            + "\n\n✅ <i>Status pensiun resmi disahkan.</i>"
         )
         await update.message.reply_text(text, parse_mode="HTML")
 
@@ -2210,22 +2207,22 @@ async def cmd_audit_kekayaan(update: Update, context: ContextTypes.DEFAULT_TYPE)
             return await update.message.reply_text("🚫 Butuh akses Admin Tier 1+.")
 
         if not context.args or not context.args[0].isdigit():
-            return await update.message.reply_text("❌ Format: <code>/audit_kekayaan [target_id]</code>", parse_mode="HTML")
+            return await update.message.reply_text("Format: <code>/audit_kekayaan [target_id]</code>", parse_mode="HTML")
 
         target_id = int(context.args[0])
         if not await user_exists(db, target_id):
-            return await update.message.reply_text(f"❌ User <code>{target_id}</code> tidak ditemukan.", parse_mode="HTML")
+            return await update.message.reply_text(f"❌ User ID <code>{target_id}</code> tidak ditemukan.", parse_mode="HTML")
 
         target_name = await get_username(db, target_id)
         net_worth, koin, bank, vault = await calculate_net_worth(db, target_id)
 
         text = (
-            f"🔍 <b>FINANCIAL AUDIT REPORT</b>\n\n"
-            f"Target ID: <code>{target_id}</code> (@{target_name})\n"
+            f"🔍 <b>FINANCIAL AUDIT REPORT (ADMIN)</b>\n\n"
+            f"Target: <code>{target_id}</code> (@{target_name})\n"
             f"──────────────────────────────\n"
             f"💵 Saldo Tunai: <b>{koin:,} Koin</b>\n"
             f"🏦 Saldo Bank: <b>{bank:,} Koin</b>\n"
-            f"🏛️ Aset Vault Head: <b>{vault:,} Koin</b>\n"
+            f"🏛️ Kas Vault : <b>{vault:,} Koin</b>\n"
             f"──────────────────────────────\n"
             f"💎 <b>TOTAL NET WORTH: {net_worth:,} Koin</b>"
         )
@@ -2235,7 +2232,7 @@ async def cmd_set_koin_admin(update: Update, context: ContextTypes.DEFAULT_TYPE)
     """Fitur Admin untuk mengatur ulang saldo koin tunai warga."""
     user_id = update.effective_user.id
     if len(context.args) < 2 or not context.args[0].isdigit() or not context.args[1].isdigit():
-        return await update.message.reply_text("❌ Format: <code>/set_koin_admin [target_id] [jumlah_koin]</code>", parse_mode="HTML")
+        return await update.message.reply_text("Format: <code>/set_koin_admin [target_id] [jumlah_koin]</code>", parse_mode="HTML")
 
     target_id = int(context.args[0])
     amount = int(context.args[1])
@@ -2246,7 +2243,7 @@ async def cmd_set_koin_admin(update: Update, context: ContextTypes.DEFAULT_TYPE)
             return await update.message.reply_text("🚫 Butuh akses Admin Tier 2+.")
 
         if not await user_exists(db, target_id):
-            return await update.message.reply_text(f"❌ User <code>{target_id}</code> tidak terdaftar.", parse_mode="HTML")
+            return await update.message.reply_text(f"❌ User ID <code>{target_id}</code> tidak terdaftar.", parse_mode="HTML")
 
         await db.execute("UPDATE users SET koin = ? WHERE user_id = ?", (amount, target_id))
         await db.commit()
@@ -2302,7 +2299,7 @@ async def cmd_rename_family(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_lock_family(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not context.args or not context.args[0].isdigit():
-        return await update.message.reply_text("❌ Format: <code>/lock_family [family_id] [alasan]</code>", parse_mode="HTML")
+        return await update.message.reply_text("Format: <code>/lock_family [family_id] [alasan]</code>", parse_mode="HTML")
     family_id = int(context.args[0])
     reason = " ".join(context.args[1:]).strip() if len(context.args) > 1 else "Investigasi Admin"
 
@@ -2314,12 +2311,12 @@ async def cmd_lock_family(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await db.commit()
         if cursor.rowcount == 0:
             return await update.message.reply_text("❌ Family ID tidak ditemukan.")
-        await update.message.reply_text(f"🔒 Keluarga <code>{family_id}</code> dikunci.\nAlasan: {reason}", parse_mode="HTML")
+        await update.message.reply_text(f"🔒 Dinasti <code>{family_id}</code> dikunci.\nAlasan: {reason}", parse_mode="HTML")
 
 async def cmd_unlock_family(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not context.args or not context.args[0].isdigit():
-        return await update.message.reply_text("❌ Format: <code>/unlock_family [family_id]</code>", parse_mode="HTML")
+        return await update.message.reply_text("Format: <code>/unlock_family [family_id]</code>", parse_mode="HTML")
     family_id = int(context.args[0])
 
     async with get_db_connection() as db:
@@ -2330,13 +2327,13 @@ async def cmd_unlock_family(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await db.commit()
         if cursor.rowcount == 0:
             return await update.message.reply_text("❌ Family ID tidak ditemukan.")
-        await update.message.reply_text(f"🔓 Keluarga <code>{family_id}</code> dibuka kembali.", parse_mode="HTML")
+        await update.message.reply_text(f"🔓 Dinasti <code>{family_id}</code> dibuka kembali.", parse_mode="HTML")
 
 async def cmd_force_divorce(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     target_id = parse_target_id(context)
     if target_id is None:
-        return await update.message.reply_text("❌ Format: <code>/force_divorce [user_id]</code>", parse_mode="HTML")
+        return await update.message.reply_text("Format: <code>/force_divorce [user_id]</code>", parse_mode="HTML")
 
     async with get_db_connection() as db:
         await ensure_all_tables_exist(db)
@@ -2345,7 +2342,7 @@ async def cmd_force_divorce(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         marriage = await get_active_marriage(db, target_id)
         if not marriage:
-            return await update.message.reply_text("❌ Target tidak sedang menikah.")
+            return await update.message.reply_text("❌ Target tidak sedang terikat pernikahan aktif.")
 
         marriage_id = marriage[0]
         now_epoch = int(time.time())
@@ -2354,13 +2351,13 @@ async def cmd_force_divorce(update: Update, context: ContextTypes.DEFAULT_TYPE):
             (now_epoch, marriage_id)
         )
         await db.commit()
-        await update.message.reply_text(f"⚖️ <b>FORCE DIVORCE</b> dieksekusi oleh Admin pada pernikahan <code>{marriage[1]}</code>.", parse_mode="HTML")
+        await update.message.reply_text(f"⚖️ <b>FORCE DIVORCE</b> dieksekusi oleh Administrator pada pernikahan <code>{marriage[1]}</code>.", parse_mode="HTML")
 
 async def cmd_excommunicate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     target_id = parse_target_id(context)
     if target_id is None:
-        return await update.message.reply_text("❌ Format: <code>/excommunicate [user_id] [alasan]</code>", parse_mode="HTML")
+        return await update.message.reply_text("Format: <code>/excommunicate [user_id] [alasan]</code>", parse_mode="HTML")
     reason = " ".join(context.args[1:]).strip() if len(context.args) > 1 else "Tidak disebutkan"
 
     async with get_db_connection() as db:
@@ -2378,16 +2375,16 @@ async def cmd_excommunicate(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await db.commit()
 
         await update.message.reply_text(
-            f"📋 <b>REQUEST EXCOMMUNICATE DIBUAT</b> (ID: <code>{action_id}</code>)\n\n"
+            f"📋 <b>PERMOHONAN EXCOMMUNICATE DITERBITKAN</b> (ID: <code>{action_id}</code>)\n\n"
             f"Target: <code>{target_id}</code>\nAlasan: {reason}\n\n"
-            f"⚠️ Butuh approval dari Admin Tier 3+ LAIN via <code>/approve_action {action_id}</code> sebelum dieksekusi.",
+            f"⚠️ Membutuhkan konfirmasi approval dari Admin Tier 3+ LAIN via <code>/approve_action {action_id}</code>.",
             parse_mode="HTML"
         )
 
 async def cmd_approve_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not context.args or not context.args[0].isdigit():
-        return await update.message.reply_text("❌ Format: <code>/approve_action [action_id]</code>", parse_mode="HTML")
+        return await update.message.reply_text("Format: <code>/approve_action [action_id]</code>", parse_mode="HTML")
     action_id = int(context.args[0])
 
     async with get_db_connection() as db:
@@ -2408,7 +2405,7 @@ async def cmd_approve_action(update: Update, context: ContextTypes.DEFAULT_TYPE)
         if status != "pending":
             return await update.message.reply_text(f"❌ Action ini sudah berstatus <code>{status}</code>.", parse_mode="HTML")
         if requested_by == user_id:
-            return await update.message.reply_text("🚫 Anda tidak bisa approve request Anda sendiri. Butuh admin Tier 3+ LAIN.")
+            return await update.message.reply_text("🚫 Anda tidak dapat menyetujui permohonan yang Anda buat sendiri.")
 
         now_epoch = int(time.time())
 
@@ -2425,22 +2422,22 @@ async def cmd_approve_action(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await db.commit()
 
         await update.message.reply_text(
-            f"✅ <b>ACTION <code>{action_id}</code> DIAPPROVE & DIEKSEKUSI</b>\n\n"
-            f"Tipe: {action_type}\nTarget: <code>{target_id}</code>\nRequested by: <code>{requested_by}</code>\nApproved by: <code>{user_id}</code>",
+            f"✅ <b>AKSI HEAVY ACTION <code>{action_id}</code> DISAHKAN!</b>\n\n"
+            f"Tipe: {action_type}\nTarget: <code>{target_id}</code>\nPemohon: <code>{requested_by}</code>\nDisetujui Oleh: <code>{user_id}</code>",
             parse_mode="HTML"
         )
 
 async def cmd_cheat_set_loyalty(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if len(context.args) < 2 or not context.args[0].isdigit() or not context.args[1].lstrip("-").isdigit():
-        return await update.message.reply_text("❌ Format: <code>/cheat_set_loyalty [user_id] [score]</code>", parse_mode="HTML")
+        return await update.message.reply_text("Format: <code>/cheat_set_loyalty [user_id] [score]</code>", parse_mode="HTML")
     target_id = int(context.args[0])
     score = max(0, min(100, int(context.args[1])))
 
     async with get_db_connection() as db:
         await ensure_all_tables_exist(db)
         if await check_admin_tier(db, user_id) < 1:
-            return await update.message.reply_text("🚫 <b>CHEAT DITOLAK:</b> Anda tidak memiliki akses Admin!", parse_mode="HTML")
+            return await update.message.reply_text("🚫 Otoritas ditolak!", parse_mode="HTML")
 
         cursor = await db.execute(
             "UPDATE family_members SET loyalty_score = ? WHERE user_id = ? AND is_active = 1",
@@ -2448,9 +2445,9 @@ async def cmd_cheat_set_loyalty(update: Update, context: ContextTypes.DEFAULT_TY
         )
         await db.commit()
         if cursor.rowcount == 0:
-            return await update.message.reply_text("❌ Target tidak punya keanggotaan keluarga aktif.")
+            return await update.message.reply_text("❌ Target tidak memiliki keanggotaan dinasti aktif.")
 
-        await update.message.reply_text(f"🧪 <b>CHEAT:</b> Loyalty <code>{target_id}</code> diset ke <b>{score}</b>.", parse_mode="HTML")
+        await update.message.reply_text(f"🧪 <b>ADMIN CHEAT:</b> Skor loyalty ID <code>{target_id}</code> ditetapkan menjadi <b>{score}</b>.", parse_mode="HTML")
 
 # ==========================================
 # SYSTEM SUB-MENU INTERAKTIF (INLINE KEYBOARD)
@@ -2462,22 +2459,25 @@ def get_main_menu_keyboard():
             InlineKeyboardButton("💍 Pernikahan", callback_data="menu_nikah")
         ],
         [
-            InlineKeyboardButton("🏛️ Keluarga", callback_data="menu_keluarga"),
+            InlineKeyboardButton("🏛️ Dinasti Keluarga", callback_data="menu_keluarga"),
             InlineKeyboardButton("⚰️ Warisan & Pensiun", callback_data="menu_warisan")
         ],
         [
-            InlineKeyboardButton("🛠️ Admin Panel", callback_data="menu_admin")
+            InlineKeyboardButton("🛠️ Administration Panel", callback_data="menu_admin")
         ]
     ]
     return InlineKeyboardMarkup(keyboard)
 
 def get_back_button():
-    return InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Kembali ke Menu Utama", callback_data="menu_main")]])
+    return InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Kembali ke Portal Utama", callback_data="menu_main")]])
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
-        "💁‍♀️ <b>HALO KAK! SELAMAT DATANG DI COSA NOSTRA LINEAGE BOT!</b>\n\n"
-        "Silakan pilih kategori layanan yang ingin Kakak akses lewat tombol interaktif di bawah ini ya! 😉✨"
+        "⚔️ <b>PUSAT REGISTRY & ADMINISTRASI DINASTI COSA NOSTRA NETWORK</b>\n"
+        "──────────────────────────────────────────\n"
+        "<i>\"Family isn't defined only by blood, but by honor, wealth, and absolute loyalty.\"</i>\n\n"
+        "Selamat datang di Portal Administrasi Lineage. Fasilitas ini mengontrol pencatatan sipil KTP Citizen, persekutuan nikah, silsilah keturunan dinasti, serta pengelolaan kas warisan secara transparan dan aman.\n\n"
+        "Silakan pilih opsi navigasi di bawah untuk memulai:"
     )
     if update.callback_query:
         query = update.callback_query
@@ -2496,70 +2496,69 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
 
     elif data == "menu_utilitas":
         text = (
-            "📝 <b>SUB-MENU PENDAFTARAN & UTILITAS</b>\n\n"
-            "• <code>/register</code> — Daftar KTP Citizen baru\n"
-            "• <code>/ktp [user_id]</code> — Cek Kartu Identitas KTP Digital & Net Worth\n"
-            "• <code>/networth [user_id]</code> — Detail rincian kekayaan bersih\n"
-            "• <code>/daily</code> — Klaim bonus koin harian gratis\n"
-            "• <code>/my_id</code> — Cek ID Telegram Kakak\n"
-            "• <code>/tree [user_id]</code> — Cek diagram visual pohon silsilah keluarga\n\n"
-            "⚠️ <i>Jika salah mengisi data saat daftar KTP, hubungi Admin ya!</i>"
+            "📝 <b>SUB-MENU PENDAFTARAN & REGISTRY CITIZEN</b>\n\n"
+            "• <code>/register</code> — Daftarkan KTP Citizen resmi baru\n"
+            "• <code>/ktp [user_id]</code> — Periksa KTP & indikator Net Worth\n"
+            "• <code>/networth [user_id]</code> — Rincian transparansi kekayaan\n"
+            "• <code>/daily</code> — Klaim dana operasional harian\n"
+            "• <code>/my_id</code> — Periksa Citizen ID Telegram\n"
+            "• <code>/tree [user_id]</code> — Bagan visual silsilah dinasti"
         )
         await query.edit_message_text(text, reply_markup=get_back_button(), parse_mode="HTML")
 
     elif data == "menu_nikah":
         text = (
-            "💍 <b>SUB-MENU LAYANAN PERNIKAHAN</b>\n\n"
-            "• <code>/propose [user_id] [tipe]</code> — Lamar doi\n"
-            "• <code>/accept_proposal [user_id]</code> — Terima lamaran\n"
-            "• <code>/reject_proposal [user_id]</code> — Tolak lamaran\n"
-            "• <code>/register_marriage [user_id]</code> — Daftar nikah manual (pasangan RP)\n"
-            "• <code>/proposals_list</code> — Cek daftar lamaran pending\n"
-            "• <code>/marriage_status</code> — Cek status pernikahan aktif\n"
-            "• <code>/anniversary</code> — Cek usia & milestone hubungan\n"
-            "• <code>/renew_vows</code> — Pembaharuan janji suci nikah\n"
-            "• <code>/divorce [split]</code> — Cerai (opsi split harta gono-gini)\n"
-            "• <code>/marriage_history</code> — Lihat riwayat mantan/pernikahan lalu"
+            "💍 <b>SUB-MENU PERSEKUTUAN NIKAH</b>\n\n"
+            "• <code>/propose [user_id] [tipe]</code> — Terbitkan proposal lamaran\n"
+            "• <code>/accept_proposal [user_id]</code> — Sahkan lamaran masuk\n"
+            "• <code>/reject_proposal [user_id]</code> — Tolak proposal lamaran\n"
+            "• <code>/register_marriage [user_id]</code> — Catat nikah manual (Legacy RP)\n"
+            "• <code>/proposals_list</code> — Daftar proposal pending\n"
+            "• <code>/marriage_status</code> — Cek status persekutuan aktif\n"
+            "• <code>/anniversary</code> — Cek milestone & badge durasi\n"
+            "• <code>/renew_vows</code> — Pembaruan janji kesetiaan\n"
+            "• <code>/divorce [split]</code> — Batalkan pernikahan (opsi split harta)\n"
+            "• <code>/marriage_history</code> — Rekor mantan pasangan"
         )
         await query.edit_message_text(text, reply_markup=get_back_button(), parse_mode="HTML")
 
     elif data == "menu_keluarga":
         text = (
-            "🏛️ <b>SUB-MENU LAYANAN KELUARGA</b>\n\n"
-            "<b>Manajemen Dasar:</b>\n"
-            "• <code>/create_family [nama]</code> — Dirikan keluarga baru\n"
-            "• <code>/family</code> — Cek info keluarga aktif\n"
-            "• <code>/leave_family</code> — Keluar sukarela dari keluarga\n"
-            "• <code>/betray</code> — Khianati keluarga (loyalty reset 0)\n"
-            "• <code>/loyalty_check [user_id]</code> — Cek skor loyalitas anggota\n"
-            "• <code>/family_history</code> — Lihat riwayat keluar-masuk keluarga\n\n"
-            "<b>Relasi & Anggota:</b>\n"
+            "🏛️ <b>SUB-MENU DINASTI KELUARGA</b>\n\n"
+            "<b>Manajemen Dinasti:</b>\n"
+            "• <code>/create_family [nama]</code> — Didirikan dinasti keluarga\n"
+            "• <code>/family</code> — Informasi struktur & kas dinasti\n"
+            "• <code>/leave_family</code> — Pengunduran diri sukarela\n"
+            "• <code>/betray</code> — Membelot dari dinasti (loyalty reset 0)\n"
+            "• <code>/loyalty_check [user_id]</code> — Cek indeks loyalitas anggota\n"
+            "• <code>/family_history</code> — Log riwayat anggota dinasti\n\n"
+            "<b>Relasi Silsilah:</b>\n"
             "• <code>/add_kandung [user_id]</code> — Tambah anak kandung\n"
             "• <code>/add_adopt [user_id]</code> — Tambah anak angkat\n"
-            "• <code>/disown [user_id]</code> — Hapus anak dari keluarga\n"
-            "• <code>/add_sibling [user_id]</code> — Tambah saudara\n"
-            "• <code>/siblings [user_id]</code> — Lihat daftar saudara\n"
-            "• <code>/godparent [user_id]</code> — Tunjuk godparent\n"
-            "• <code>/revoke_godparent [user_id]</code> — Cabut status godparent\n"
-            "• <code>/my_godchildren</code> — Lihat daftar godchildren\n"
-            "• <code>/in_laws</code> — Lihat keluarga pasangan (mertua/ipar)\n\n"
-            "<b>Kas & Kekuasaan (Head):</b>\n"
-            "• <code>/deposit_vault [jumlah]</code> — Setor koin ke kas keluarga\n"
-            "• <code>/withdraw_vault [jumlah]</code> — Tarik koin dari kas keluarga (Head)\n"
-            "• <code>/set_family_tax [0-100]</code> — Atur pajak keluarga (Head)\n"
-            "• <code>/transfer_head [user_id]</code> — Transfer kepemimpinan keluarga\n"
+            "• <code>/disown [user_id]</code> — Hapus anak dari silsilah\n"
+            "• <code>/add_sibling [user_id]</code> — Tambah garis saudara\n"
+            "• <code>/siblings [user_id]</code> — Daftar garis saudara\n"
+            "• <code>/godparent [user_id]</code> — Tunjuk Godparent resmi\n"
+            "• <code>/revoke_godparent [user_id]</code> — Cabut status Godparent\n"
+            "• <code>/my_godchildren</code> — Daftar Godchildren\n"
+            "• <code>/in_laws</code> — Struktur keluarga pasangan (Mertua/Ipar)\n\n"
+            "<b>Kas & Otoritas Head:</b>\n"
+            "• <code>/deposit_vault [jumlah]</code> — Setor koin ke Vault Dinasti\n"
+            "• <code>/withdraw_vault [jumlah]</code> — Tarik dana Vault Dinasti (Head)\n"
+            "• <code>/set_family_tax [0-100]</code> — Tetapkan pajak dinasti (Head)\n"
+            "• <code>/transfer_head [user_id]</code> — Alihkan takhta Kepala Keluarga\n"
             "• <code>/kick_member [user_id]</code> — Keluarkan anggota (Head)"
         )
         await query.edit_message_text(text, reply_markup=get_back_button(), parse_mode="HTML")
 
     elif data == "menu_warisan":
         text = (
-            "⚰️ <b>SUB-MENU LAYANAN WARISAN & PENSIUN</b>\n\n"
-            "• <code>/will [id:persen ...]</code> — Atur pembagian surat wasiat\n"
+            "⚰️ <b>SUB-MENU WARISAN & PENSIUN</b>\n\n"
+            "• <code>/will [id:persen ...]</code> — Atur alokasi surat wasiat\n"
             "• <code>/appoint_heir [user_id]</code> — Tunjuk ahli waris tunggal (100%)\n"
-            "• <code>/will_status</code> — Cek isi surat wasiat\n"
-            "• <code>/cancel_will</code> — Batalkan surat wasiat\n"
-            "• <code>/retire</code> — Eksekusi wasiat & bagi harta ke ahli waris"
+            "• <code>/will_status</code> — Periksa status dokumen wasiat\n"
+            "• <code>/cancel_will</code> — Batalkan dokumen wasiat\n"
+            "• <code>/retire</code> — Eksekusi wasiat & bagikan aset ke ahli waris"
         )
         await query.edit_message_text(text, reply_markup=get_back_button(), parse_mode="HTML")
 
