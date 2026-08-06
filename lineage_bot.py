@@ -616,20 +616,29 @@ async def cmd_propose(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return await update.message.reply_text("🚫 <b>Ditolak Sistem:</b> Kakak tidak bisa melamar anggota keluarga kandung/relasi dekat sendiri ya!")
 
         since_epoch = int(time.time()) - 86400
-        async with db.execute(
-            "SELECT COUNT(*) FROM marriage_proposals WHERE proposer_id = ? AND created_at > ?",
-            (user_id, since_epoch)
-        ) as cursor:
-            count_today = (await cursor.fetchone())[0]
+        
+        # PERBAIKAN: Dibungkus dengan try-except aiosqlite.OperationalError[cite: 2]
+        try:
+            async with db.execute(
+                "SELECT COUNT(*) FROM marriage_proposals WHERE proposer_id = ? AND created_at > ?",
+                (user_id, since_epoch)
+            ) as cursor:
+                count_today = (await cursor.fetchone())[0]
+        except aiosqlite.OperationalError:
+            count_today = 0
+
         if count_today >= MAX_PROPOSALS_PER_DAY:
             return await update.message.reply_text(f"🛑 Waduh, Kakak gercep banget! Udah kirim {MAX_PROPOSALS_PER_DAY} lamaran hari ini. Istirahat dulu, coba lagi besok ya!")
 
-        async with db.execute(
-            "SELECT 1 FROM marriage_proposals WHERE proposer_id = ? AND target_id = ? AND status = 'pending'",
-            (user_id, target_id)
-        ) as cursor:
-            if await cursor.fetchone():
-                return await update.message.reply_text("⏳ Lamaran Kakak ke doi masih pending nih. Tunggu dijawab dulu ya~")
+        try:
+            async with db.execute(
+                "SELECT 1 FROM marriage_proposals WHERE proposer_id = ? AND target_id = ? AND status = 'pending'",
+                (user_id, target_id)
+            ) as cursor:
+                if await cursor.fetchone():
+                    return await update.message.reply_text("⏳ Lamaran Kakak ke doi masih pending nih. Tunggu dijawab dulu ya~")
+        except aiosqlite.OperationalError:
+            pass
 
         now_epoch = int(time.time())
         expires_at = now_epoch + PROPOSAL_TTL_SECONDS
@@ -2050,6 +2059,8 @@ def build_app():
     return app
 
 def main():
+    # PERBAIKAN: Memastikan database terinisialisasi sebelum polling bot berjalan[cite: 2]
+    asyncio.run(init_lineage_db())
     app = build_app()
     print("🧬 Telegram Cosa Nostra Lineage Bot Running...")
     app.run_polling()
