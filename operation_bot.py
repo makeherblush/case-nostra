@@ -39,6 +39,17 @@ WIB = timezone(timedelta(hours=7)) # UTC+7
 
 MY_PERMANENT_OWNER_ID = 8396793986
 
+# Threshold pencapaian ke rank berikutnya (Rank 1 - 6)
+RANK_THRESHOLDS = [5, 15, 30, 50, 80, 120]
+
+RANK_TITLES = {
+    "police": ["Cadet", "Officer", "Detective", "Sergeant", "Lieutenant", "Captain", "Commissioner"],
+    "lawyer": ["Paralegal", "Junior Attorney", "Associate", "Senior Partner", "Managing Partner", "Defense Elite", "Legal Titan"],
+    "judge": ["Clerk", "Magistrate", "District Judge", "Circuit Judge", "Appellate Judge", "Supreme Justice", "Chief Justice"],
+    "politician": ["Intern", "Campaign Staff", "City Councilor", "State Representative", "Senator", "Governor", "President"],
+    "journalist": ["Cub Reporter", "Staff Writer", "Investigative Reporter", "Senior Editor", "Managing Editor", "Bureau Chief", "Media Mogul"]
+}
+
 # ==========================================
 # HELPER KONEKSI DATABASE (WAL MODE ENABLER)
 # ==========================================
@@ -59,7 +70,32 @@ async def get_db_connection():
 # ==========================================
 # DATABASE HELPER & AUTO-SYNC LOGIC
 # ==========================================
-USER_COLUMNS = "user_id, username, koin, bank_balance, bank_loan, vitality, gelar_tier, heat, respect, admin_tier, jailed_until, bounty, crew_id, last_work, last_daily, job_active, job_finish_time, last_business_collect"
+USER_COLUMNS = "user_id, username, koin, bank_balance, bank_loan, vitality, gelar_tier, heat, respect, admin_tier, jailed_until, bounty, crew_id, last_work, last_daily, job_active, job_finish_time, last_business_collect, career_track, career_rank, arrest_count, bail_count, pardon_count, expose_count, amnesty_count"
+
+def get_rank_title(track: str, rank: int) -> str:
+    titles = RANK_TITLES.get(track, [])
+    if 0 <= rank < len(titles):
+        return titles[rank]
+    return f"Rank {rank}"
+
+async def check_and_update_rank(db, user_id: int, track: str, current_count: int, current_rank: int) -> tuple[int, bool]:
+    new_rank = current_rank
+    for i, threshold in enumerate(RANK_THRESHOLDS):
+        if current_count >= threshold:
+            new_rank = i + 1
+        else:
+            break
+    new_rank = min(new_rank, 6)
+    promoted = new_rank > current_rank
+    if promoted:
+        await db.execute("UPDATE users SET career_rank = ? WHERE user_id = ?", (new_rank, user_id))
+        await db.commit()
+    return new_rank, promoted
+
+def parse_target_id(context) -> int | None:
+    if not context.args or not context.args[0].lstrip("-").isdigit():
+        return None
+    return int(context.args[0])
 
 async def sync_gelar_from_assets(db, user_id: int) -> str:
     """
@@ -117,9 +153,31 @@ async def get_or_create_user(db, user_id: int, username: str):
             last_daily INTEGER DEFAULT 0,
             job_active TEXT,
             job_finish_time INTEGER DEFAULT 0,
-            last_business_collect INTEGER DEFAULT 0
+            last_business_collect INTEGER DEFAULT 0,
+            career_track TEXT DEFAULT 'mafia',
+            career_rank INTEGER DEFAULT 0,
+            arrest_count INTEGER DEFAULT 0,
+            bail_count INTEGER DEFAULT 0,
+            pardon_count INTEGER DEFAULT 0,
+            expose_count INTEGER DEFAULT 0,
+            amnesty_count INTEGER DEFAULT 0
         )
     """)
+    
+    columns = [
+        ("career_track", "TEXT DEFAULT 'mafia'"),
+        ("career_rank", "INTEGER DEFAULT 0"),
+        ("arrest_count", "INTEGER DEFAULT 0"),
+        ("bail_count", "INTEGER DEFAULT 0"),
+        ("pardon_count", "INTEGER DEFAULT 0"),
+        ("expose_count", "INTEGER DEFAULT 0"),
+        ("amnesty_count", "INTEGER DEFAULT 0")
+    ]
+    for col_name, col_type in columns:
+        try:
+            await db.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_type};")
+        except Exception:
+            pass
     await db.commit()
 
     async with db.execute(f"SELECT {USER_COLUMNS} FROM users WHERE user_id = ?", (user_id,)) as cursor:
@@ -180,7 +238,7 @@ JOBS = {
     "cop_bribe": {"name": "Polisi Terlibat Suap (Korupsi)", "tier": "G1", "category": "police", "dur": 7200, "vit": 15, "min": 1500, "max": 3500, "desc": "Terima uang damai dari bos kriminal jalanan"},
     "undercover": {"name": "Penyusupan Intel Undercover", "tier": "G2", "category": "police", "dur": 10800, "vit": 25, "min": 3000, "max": 7000, "desc": "Menyamar sebagai anggota sindikat Cosa Nostra"},
     "raid_lab": {"name": "Penggerebekan Lab Gelap", "tier": "G3", "category": "police", "dur": 14400, "vit": 35, "min": 6000, "max": 14000, "desc": "Serbu gudang penyimpan aset narkoba mafia"},
-    "mole_leak": {"name": "Bocorkan Informasi Intel (Mole)", "tier": "G4", "category": "police", "dur": 18000, "vit": 40, "min": 12000, "max": 25000, "desc": "Jual jadwal sergap polisi ke pihak Don Famiglia"},
+    "mole_leak": {"name": "Bocorkan Informasi Intel (Mole)", "tier": "G4", "category": "police", "dur": 18000, "vit": 40, "min": 12000, "max": 25000, "desc": "Jual jadwal sergap polisi ke pihak Famiglia"},
     "chief_protection": {"name": "Pelindung Ring Atas (Chief)", "tier": "G5", "category": "police", "dur": 28800, "vit": 50, "min": 25000, "max": 60000, "desc": "Hapus catatan kriminal & lindungi operasional kartel"}
 }
 
@@ -216,7 +274,14 @@ async def init_db():
                 last_daily INTEGER DEFAULT 0,
                 job_active TEXT,
                 job_finish_time INTEGER DEFAULT 0,
-                last_business_collect INTEGER DEFAULT 0
+                last_business_collect INTEGER DEFAULT 0,
+                career_track TEXT DEFAULT 'mafia',
+                career_rank INTEGER DEFAULT 0,
+                arrest_count INTEGER DEFAULT 0,
+                bail_count INTEGER DEFAULT 0,
+                pardon_count INTEGER DEFAULT 0,
+                expose_count INTEGER DEFAULT 0,
+                amnesty_count INTEGER DEFAULT 0
             )
         """)
         await db.execute("""
@@ -273,10 +338,11 @@ def get_main_menu_keyboard():
             InlineKeyboardButton("🔨 Pekerjaan & Misi", callback_data="opmenu_jobs")
         ],
         [
-            InlineKeyboardButton("🎯 Target & Buronan", callback_data="opmenu_targets"),
-            InlineKeyboardButton("🏴‍☠️ Organisasi Crew", callback_data="opmenu_crew")
+            InlineKeyboardButton("💼 Profesi Publik", callback_data="opmenu_career"),
+            InlineKeyboardButton("🎯 Target & Buronan", callback_data="opmenu_targets")
         ],
         [
+            InlineKeyboardButton("🏴‍☠️ Organisasi Crew", callback_data="opmenu_crew"),
             InlineKeyboardButton("🛠️ Operations Admin", callback_data="opmenu_admin")
         ]
     ]
@@ -296,7 +362,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "⚔️ <b>SELAMAT DATANG DI PUSAT OPERASIONAL COSA NOSTRA</b>\n"
         "──────────────────────────────────────────\n"
         "<i>\"Loyalty, Strategy, and Supreme Command in Every Operation.\"</i>\n\n"
-        "Selamat datang di Portal Komando Utama Operasional Cosa Nostra Network. Kami siap memfasilitasi dan mengarahkan seluruh aktivitas penugasan taktis, eksekusi misi strategis bertingkat, penyamaran intelijen polisi, pengelolaan skuadron Crew, serta pengawasan status hukum anggota secara profesional dan aman.\n\n"
+        "Selamat datang di Portal Komando Utama Operasional Cosa Nostra Network. Kami siap memfasilitasi dan mengarahkan seluruh aktivitas penugasan taktis, eksekusi misi strategis bertingkat, karir penegakan hukum publik, penyamaran intelijen, laporan jurnalisme, kebijakan amnesti politisi, pengelolaan skuadron Crew, serta pengawasan status hukum anggota secara profesional dan aman.\n\n"
         "Silakan pilih kategori operasional yang ingin Anda akses melalui opsi di bawah ini:"
     )
     if update.callback_query:
@@ -331,6 +397,20 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
             "• <code>/job [kode_job]</code> — Jalankan penugasan atau misi penyamaran\n"
             "• <code>/crime</code> — Cek daftar opsi kejahatan berisiko\n"
             "• <code>/crime [kode_crime]</code> — Eksekusi aksi kejahatan lapangan"
+        )
+        await query.edit_message_text(text, reply_markup=get_back_button(), parse_mode="HTML")
+
+    elif data == "opmenu_career":
+        text = (
+            "💼 <b>SUB-MENU KARIR & PROFESI PUBLIK</b>\n\n"
+            "• <code>/career</code> — Cek status karir & opsi beralih profesi\n"
+            "• <code>/badge</code> — Cek progres lencana pangkat profesi\n"
+            "• <code>/patrol</code> — Patroli otomatis khusus Kepolisian (Police)\n"
+            "• <code>/arrest [user_id]</code> — Penangkapan manual buronan (Police)\n"
+            "• <code>/bail [user_id]</code> — Bebaskan tahanan dengan jaminan (Lawyer)\n"
+            "• <code>/pardon [user_id]</code> — Grasi ampunan hapus Heat/Bounty (Judge)\n"
+            "• <code>/expose [user_id]</code> — Investigasi & rilis laporan finansial (Journalist)\n"
+            "• <code>/amnesty [user_id]</code> — Kebijakan amnesties pemotongan Heat (Politician)"
         )
         await query.edit_message_text(text, reply_markup=get_back_button(), parse_mode="HTML")
 
@@ -401,6 +481,8 @@ async def cmd_rekening(update: Update, context: ContextTypes.DEFAULT_TYPE):
         jailed_until = user[10]
         bounty = user[11]
         crew_id = user[12]
+        career_track = user[18]
+        career_rank = user[19]
 
         jail_status = "🟢 BEBAS"
         if jailed_until > now_epoch:
@@ -414,10 +496,13 @@ async def cmd_rekening(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if c_row:
                     crew_name = c_row[0]
 
+        career_title = get_rank_title(career_track, career_rank) if career_track != "mafia" else f"Mafia ({gelar})"
+
         text = (
             f"👤 <b>PROFIL ANGGOTA COSA NOSTRA</b>\n\n"
             f"Nama: <b>@{db_username}</b> (<code>{user_id}</code>)\n"
             f"Gelar Pangkat: <b>{gelar}</b>\n"
+            f"Profesi Publik: <b>{career_track.upper()}</b> — {career_title}\n"
             f"Crew: <b>{crew_name}</b>\n"
             f"───────────────────\n"
             f"💵 Cash Tunai: <b>{koin:,} Koin</b>\n"
@@ -429,6 +514,435 @@ async def cmd_rekening(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Status Hukum: {jail_status}"
         )
         
+        await update.message.reply_text(text, parse_mode="HTML")
+
+async def cmd_career(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    current_username = update.effective_user.username or update.effective_user.first_name or "TanpaUsername"
+    async with get_db_connection() as db:
+        user = await get_or_create_user(db, user_id, current_username)
+        gelar_tier = user[6]
+        track = user[18]
+        rank = user[19]
+        arrest = user[20]
+        bail = user[21]
+        pardon = user[22]
+        expose = user[23]
+        amnesty = user[24]
+
+        if context.args and context.args[0].lower() == "choose":
+            if len(context.args) < 2:
+                return await update.message.reply_text(
+                    "📋 <b>PILIH JALUR KARIR RESMI</b>\n\n"
+                    "Opsi jalur karir publik yang tersedia:\n"
+                    "• <code>police</code> — Penegak Hukum & Pemburu Buronan\n"
+                    "• <code>lawyer</code> — Pengacara & Penjamin Tahanan\n"
+                    "• <code>judge</code> — Hakim Agung Pemutus Vonis\n"
+                    "• <code>politician</code> — Pejabat Publik & Kebijakan\n"
+                    "• <code>journalist</code> — Jurnalis Investigasi & Audit\n\n"
+                    "Format: <code>/career choose [track]</code>\n"
+                    "<i>Contoh: /career choose police</i>",
+                    parse_mode="HTML"
+                )
+
+            selected = context.args[1].lower()
+            if selected not in RANK_TITLES:
+                return await update.message.reply_text("❌ Jalur karir tidak valid. Pilih antara: police, lawyer, judge, politician, atau journalist.")
+
+            if gelar_tier != "G0":
+                return await update.message.reply_text(
+                    "🚫 <b>KONFLIK KEPENTINGAN DITOLAK!</b>\n\n"
+                    f"Anda sudah memegang gelar Sindikat Mafia (<b>{gelar_tier}</b>). "
+                    "Petinggi kartel tidak dapat merangkap jabatan sebagai Penegak Hukum publik!",
+                    parse_mode="HTML"
+                )
+
+            await db.execute("UPDATE users SET career_track = ?, career_rank = 0 WHERE user_id = ?", (selected, user_id))
+            await db.commit()
+            
+            title = get_rank_title(selected, 0)
+            return await update.message.reply_text(
+                f"📑 <b>PELANTIKAN KARIR PUBLIK BERHASIL!</b>\n\n"
+                f"Jalur Karir  : <b>{selected.upper()}</b>\n"
+                f"Pangkat Awal : <b>{title}</b> (Rank 0)\n\n"
+                f"Laksanakan tugas operasional Anda untuk menaikkan pangkat!",
+                parse_mode="HTML"
+            )
+
+        title = get_rank_title(track, rank) if track != "mafia" else f"Mafia ({gelar_tier})"
+        count_map = {
+            "police": (arrest, "Penangkapan"),
+            "lawyer": (bail, "Pembebasan Bail"),
+            "judge": (pardon, "Pemberian Ampunan"),
+            "politician": (amnesty, "Amnesti Publik"),
+            "journalist": (expose, "Laporan Investigasi")
+        }
+        
+        stat_info = ""
+        if track in count_map:
+            val, label = count_map[track]
+            stat_info = f"\n📊 Record Operasional : <b>{val} {label}</b>"
+
+        text = (
+            f"💼 <b>PROFIL KARIR & OTORITAS PUBLIK</b>\n"
+            f"──────────────────────────────\n"
+            f"Jalur Karir  : <b>{track.upper()}</b>\n"
+            f"Pangkat/Rank : <b>{title}</b> (Rank {rank}){stat_info}\n"
+            f"──────────────────────────────\n"
+            f"<i>Gunakan '/career choose [track]' jika ingin beralih profesi (Khusus non-mafia G0).</i>"
+        )
+        await update.message.reply_text(text, parse_mode="HTML")
+
+async def cmd_badge(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    current_username = update.effective_user.username or update.effective_user.first_name or "TanpaUsername"
+    async with get_db_connection() as db:
+        user = await get_or_create_user(db, user_id, current_username)
+        track = user[18]
+        rank = user[19]
+        arrest = user[20]
+        bail = user[21]
+        pardon = user[22]
+        expose = user[23]
+        amnesty = user[24]
+
+        if track == "mafia":
+            return await update.message.reply_text("🍷 Lencana karir publik tidak berlaku untuk jajaran Sindikat Mafia. Naikkan gelar hirarki via Shop!")
+
+        count_map = {
+            "police": arrest,
+            "lawyer": bail,
+            "judge": pardon,
+            "politician": amnesty,
+            "journalist": expose
+        }
+
+        current_count = count_map.get(track, 0)
+        title = get_rank_title(track, rank)
+
+        if rank >= 6:
+            progress_str = "🏆 <b>RANK MAKSIMAL TERCAPAI (Media Mogul / Titan)</b>"
+        else:
+            target_next = RANK_THRESHOLDS[rank]
+            remaining = target_next - current_count
+            next_title = get_rank_title(track, rank + 1)
+            progress_str = (
+                f"🎯 Next Rank    : <b>{next_title}</b> (Rank {rank + 1})\n"
+                f"📈 Progres Target: <b>{current_count}/{target_next}</b> (Sisa {remaining} tindakan lagi)"
+            )
+
+        text = (
+            f"🎖️ <b>LENCANA INSIGNIA & PROGRES PANGKAT</b>\n"
+            f"──────────────────────────────\n"
+            f"Profesi      : <b>{track.upper()}</b>\n"
+            f"Lencana Aktif: <b>{title}</b> (Rank {rank})\n"
+            f"──────────────────────────────\n"
+            f"{progress_str}"
+        )
+        await update.message.reply_text(text, parse_mode="HTML")
+
+async def cmd_patrol(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    current_username = update.effective_user.username or update.effective_user.first_name or "TanpaUsername"
+    async with get_db_connection() as db:
+        user = await get_or_create_user(db, user_id, current_username)
+        track = user[18]
+        rank = user[19]
+        arrest_count = user[20]
+
+        if track != "police":
+            return await update.message.reply_text("🚫 <b>AKSES DITOLAK:</b> Perintah patroli unit hanya dapat dieksekusi oleh Kepolisian (Track Police)!")
+
+        now_epoch = int(time.time())
+
+        async with db.execute(
+            """SELECT user_id, username, heat, bounty FROM users 
+               WHERE (heat >= 30 OR bounty > 0) AND jailed_until < ? AND user_id != ? 
+               ORDER BY heat DESC LIMIT 1""",
+            (now_epoch, user_id)
+        ) as cursor:
+            target = await cursor.fetchone()
+
+        if not target:
+            return await update.message.reply_text("🚔 <b>PATROLI UNIT KEPOLISIAN:</b> Jalanan kota aman. Tidak ditemukan buronan ber-heat tinggi saat ini.")
+
+        t_id, t_name, t_heat, t_bounty = target
+        jail_duration = 300 + (t_heat * 10)
+        jailed_until = now_epoch + jail_duration
+        commission = 3000 + (rank * 1500) + t_bounty
+
+        await db.execute("UPDATE users SET jailed_until = ?, heat = 0, bounty = 0 WHERE user_id = ?", (jailed_until, t_id))
+        await db.execute("UPDATE users SET koin = koin + ?, arrest_count = arrest_count + 1 WHERE user_id = ?", (commission, user_id))
+        
+        new_arrest = arrest_count + 1
+        new_rank, promoted = await check_and_update_rank(db, user_id, "police", new_arrest, rank)
+        await db.commit()
+
+        promo_msg = f"\n🎉 <b>PROMOSI PANGKAT!</b> Selamat, Anda naik pangkat ke <b>{get_rank_title('police', new_rank)}</b>!" if promoted else ""
+
+        text = (
+            f"🚨 <b>PATROLI KEPOLISIAN BERHASIL!</b>\n\n"
+            f"Unit Patroli menangkap buronan : <b>@{t_name}</b> (<code>{t_id}</code>)\n"
+            f"⚖️ Heat Target : {t_heat} | Bounty Ditutup: {t_bounty:,} Koin\n"
+            f"🔒 Masa Tahanan: {jail_duration // 60} Menit di Penjara\n"
+            f"💵 Imbalan Dinas: <b>+{commission:,} Koin</b>{promo_msg}"
+        )
+        await update.message.reply_text(text, parse_mode="HTML")
+
+async def cmd_arrest(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    current_username = update.effective_user.username or update.effective_user.first_name or "TanpaUsername"
+    target_id = parse_target_id(context)
+
+    if not target_id:
+        return await update.message.reply_text("Format penangkapan: <code>/arrest [user_id_buronan]</code>", parse_mode="HTML")
+
+    async with get_db_connection() as db:
+        user = await get_or_create_user(db, user_id, current_username)
+        track = user[18]
+        rank = user[19]
+        arrest_count = user[20]
+
+        if track != "police":
+            return await update.message.reply_text("🚫 Wewenang penangkapan manual hanya dimiliki oleh Kepolisian!")
+
+        now_epoch = int(time.time())
+
+        async with db.execute("SELECT username, heat, bounty, jailed_until FROM users WHERE user_id = ?", (target_id,)) as cursor:
+            target = await cursor.fetchone()
+
+        if not target:
+            return await update.message.reply_text("❌ Citizen ID target tidak ditemukan.")
+
+        t_name, t_heat, t_bounty, t_jailed = target
+
+        if t_jailed > now_epoch:
+            return await update.message.reply_text("⚠️ Target sudah mendekam di dalam sel tahanan!")
+
+        if t_heat < 20 and t_bounty <= 0:
+            return await update.message.reply_text("⚖️ Target tidak memiliki Heat/Bounty yang cukup untuk penangkapan resmi (Min. 20 Heat).")
+
+        jail_duration = 300 + (t_heat * 12)
+        jailed_until = now_epoch + jail_duration
+        reward = 2500 + (rank * 1000) + t_bounty
+
+        await db.execute("UPDATE users SET jailed_until = ?, heat = 0, bounty = 0 WHERE user_id = ?", (jailed_until, target_id))
+        await db.execute("UPDATE users SET koin = koin + ?, arrest_count = arrest_count + 1 WHERE user_id = ?", (reward, user_id))
+        
+        new_arrest = arrest_count + 1
+        new_rank, promoted = await check_and_update_rank(db, user_id, "police", new_arrest, rank)
+        await db.commit()
+
+        promo_msg = f"\n🎉 <b>PROMOSI PANGKAT!</b> Selamat, Anda naik pangkat ke <b>{get_rank_title('police', new_rank)}</b>!" if promoted else ""
+
+        text = (
+            f"⚖️ <b>EKSEKUSI SURAT PENANGKAPAN!</b>\n\n"
+            f"Tahanan    : <b>@{t_name}</b> (<code>{target_id}</code>)\n"
+            f"🔒 Sel Tahanan: {jail_duration // 60} Menit\n"
+            f"💵 Komisi Dinas: <b>+{reward:,} Koin</b>{promo_msg}"
+        )
+        await update.message.reply_text(text, parse_mode="HTML")
+
+async def cmd_bail(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    current_username = update.effective_user.username or update.effective_user.first_name or "TanpaUsername"
+    target_id = parse_target_id(context)
+
+    if not target_id:
+        return await update.message.reply_text("Format penjaminan: <code>/bail [user_id_tahanan]</code>", parse_mode="HTML")
+
+    async with get_db_connection() as db:
+        user = await get_or_create_user(db, user_id, current_username)
+        track = user[18]
+        rank = user[19]
+        bail_count = user[21]
+        user_koin = user[2]
+
+        if track != "lawyer":
+            return await update.message.reply_text("🚫 Jasa penjaminan pembebasan tahanan (Bail) hanya dapat dilakukan oleh Pengacara (Lawyer)!")
+
+        now_epoch = int(time.time())
+
+        async with db.execute("SELECT username, jailed_until FROM users WHERE user_id = ?", (target_id,)) as cursor:
+            target = await cursor.fetchone()
+
+        if not target:
+            return await update.message.reply_text("❌ Citizen ID target tidak ditemukan.")
+
+        t_name, t_jailed = target
+
+        if t_jailed <= now_epoch:
+            return await update.message.reply_text("⚠️ Target saat ini tidak sedang mendekam di penjara.")
+
+        base_bail_fee = 5000
+        discount = rank * 600
+        final_fee = max(1000, base_bail_fee - discount)
+
+        if user_koin < final_fee:
+            return await update.message.reply_text(f"❌ Saldo Anda kurang untuk membayar jaminan Bail sebesar <b>{final_fee:,} Koin</b>.", parse_mode="HTML")
+
+        await db.execute("UPDATE users SET jailed_until = 0 WHERE user_id = ?", (target_id,))
+        await db.execute("UPDATE users SET koin = koin - ?, bail_count = bail_count + 1 WHERE user_id = ?", (final_fee, user_id))
+        
+        new_bail = bail_count + 1
+        new_rank, promoted = await check_and_update_rank(db, user_id, "lawyer", new_bail, rank)
+        await db.commit()
+
+        promo_msg = f"\n🎉 <b>PROMOSI PANGKAT!</b> Selamat, Anda naik pangkat ke <b>{get_rank_title('lawyer', new_rank)}</b>!" if promoted else ""
+
+        text = (
+            f"⚖️ <b>SURAT PENJAMINAN BAIL DITERBITKAN!</b>\n\n"
+            f"Klien Bebas : <b>@{t_name}</b> (<code>{target_id}</code>)\n"
+            f"💵 Biaya Bail : <b>{final_fee:,} Koin</b> (Diskon Rank: -{discount:,})\n"
+            f"📂 Rekor Lawyer: {new_bail} Kasus Dimenangkan{promo_msg}"
+        )
+        await update.message.reply_text(text, parse_mode="HTML")
+
+async def cmd_pardon(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    current_username = update.effective_user.username or update.effective_user.first_name or "TanpaUsername"
+    target_id = parse_target_id(context)
+
+    if not target_id:
+        return await update.message.reply_text("Format grasi: <code>/pardon [user_id]</code>", parse_mode="HTML")
+
+    async with get_db_connection() as db:
+        user = await get_or_create_user(db, user_id, current_username)
+        track = user[18]
+        rank = user[19]
+        pardon_count = user[22]
+
+        if track != "judge":
+            return await update.message.reply_text("🚫 Hak pengeluaran Vonis Ampunan (Pardon) secara mutlak hanya milik Hakim Agung (Judge)!")
+
+        async with db.execute("SELECT username, heat, bounty FROM users WHERE user_id = ?", (target_id,)) as cursor:
+            target = await cursor.fetchone()
+
+        if not target:
+            return await update.message.reply_text("❌ Citizen ID target tidak ditemukan.")
+
+        t_name, t_heat, t_bounty = target
+
+        if t_heat == 0 and t_bounty == 0:
+            return await update.message.reply_text("⚠️ Target tidak memiliki catatan kriminal / Heat aktif.")
+
+        await db.execute("UPDATE users SET heat = 0, bounty = 0 WHERE user_id = ?", (target_id,))
+        await db.execute("UPDATE users SET pardon_count = pardon_count + 1 WHERE user_id = ?", (user_id,))
+        
+        new_pardon = pardon_count + 1
+        new_rank, promoted = await check_and_update_rank(db, user_id, "judge", new_pardon, rank)
+        await db.commit()
+
+        promo_msg = f"\n🎉 <b>PROMOSI PANGKAT!</b> Selamat, Anda naik pangkat ke <b>{get_rank_title('judge', new_rank)}</b>!" if promoted else ""
+
+        text = (
+            f"⚖️ <b>VONIS AMNESTI & GRASI HAKIM AGUNG!</b>\n\n"
+            f"Terdakwa     : <b>@{t_name}</b> (<code>{target_id}</code>)\n"
+            f"📜 Keputusan  : Seluruh Heat & Bounty Dihapuskan Resmi\n"
+            f"👨‍⚖️ Total Grasi : {new_pardon} Kasus{promo_msg}"
+        )
+        await update.message.reply_text(text, parse_mode="HTML")
+
+async def cmd_expose(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Khusus Jurnalis: Publikasikan rincian aset & Heat target ke publik."""
+    user_id = update.effective_user.id
+    current_username = update.effective_user.username or update.effective_user.first_name or "TanpaUsername"
+    target_id = parse_target_id(context)
+
+    if not target_id:
+        return await update.message.reply_text("Format laporan investigasi: <code>/expose [user_id]</code>", parse_mode="HTML")
+
+    async with get_db_connection() as db:
+        user = await get_or_create_user(db, user_id, current_username)
+        track = user[18]
+        rank = user[19]
+        expose_count = user[23]
+
+        if track != "journalist":
+            return await update.message.reply_text("🚫 Akses pengeluaran laporan investigasi publik (Expose) hanya dimiliki oleh Jurnalis!")
+
+        async with db.execute("SELECT username, koin, bank_balance, heat, bounty FROM users WHERE user_id = ?", (target_id,)) as cursor:
+            target = await cursor.fetchone()
+
+        if not target:
+            return await update.message.reply_text("❌ Citizen ID target tidak ditemukan.")
+
+        t_name, t_koin, t_bank, t_heat, t_bounty = target
+        royalty = 3000 + (rank * 1200)
+
+        await db.execute("UPDATE users SET koin = koin + ?, expose_count = expose_count + 1 WHERE user_id = ?", (royalty, user_id))
+        
+        new_expose = expose_count + 1
+        new_rank, promoted = await check_and_update_rank(db, user_id, "journalist", new_expose, rank)
+        await db.commit()
+
+        promo_msg = f"\n🎉 <b>PROMOSI PANGKAT!</b> Selamat, Anda naik pangkat ke <b>{get_rank_title('journalist', new_rank)}</b>!" if promoted else ""
+
+        text = (
+            f"📰 <b>BERITA UTAMA — INVESTIGASI MEDIA EXPOSE!</b>\n\n"
+            f"Subjek Investigasi: <b>@{t_name}</b> (<code>{target_id}</code>)\n"
+            f"──────────────────────────────\n"
+            f"💵 Likuiditas Cash: <b>{t_koin:,} Koin</b>\n"
+            f"🏦 Deposito Bank : <b>{t_bank:,} Koin</b>\n"
+            f"🔥 Level Heat   : <b>{t_heat}</b>\n"
+            f"🎯 Status Bounty : <b>{t_bounty:,} Koin</b>\n"
+            f"──────────────────────────────\n"
+            f"🖋️ Royalty Artikel: <b>+{royalty:,} Koin</b>\n"
+            f"📊 Total Laporan  : {new_expose} Laporan Terbit{promo_msg}"
+        )
+        await update.message.reply_text(text, parse_mode="HTML")
+
+async def cmd_amnesty(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Khusus Politisi: Menerbitkan amnesties pemotongan Heat & Bounty target."""
+    user_id = update.effective_user.id
+    current_username = update.effective_user.username or update.effective_user.first_name or "TanpaUsername"
+    target_id = parse_target_id(context)
+
+    if not target_id:
+        return await update.message.reply_text("Format permohonan amnesties: <code>/amnesty [user_id]</code>", parse_mode="HTML")
+
+    async with get_db_connection() as db:
+        user = await get_or_create_user(db, user_id, current_username)
+        track = user[18]
+        rank = user[19]
+        amnesty_count = user[24]
+
+        if track != "politician":
+            return await update.message.reply_text("🚫 Otoritas pengeluaran kebijakan Amnesti Publik hanya dimiliki oleh Politisi!")
+
+        async with db.execute("SELECT username, heat, bounty FROM users WHERE user_id = ?", (target_id,)) as cursor:
+            target = await cursor.fetchone()
+
+        if not target:
+            return await update.message.reply_text("❌ Citizen ID target tidak ditemukan.")
+
+        t_name, t_heat, t_bounty = target
+
+        if t_heat == 0 and t_bounty == 0:
+            return await update.message.reply_text("⚠️ Target tidak memiliki Heat atau Bounty aktif untuk diberikan amnesties.")
+
+        # Persentase pemotongan Heat/Bounty berdasarkan rank politisi (20% s/d 80%)
+        reduction_rate = 0.20 + (rank * 0.10)
+        new_heat = int(t_heat * (1 - reduction_rate))
+        new_bounty = int(t_bounty * (1 - reduction_rate))
+
+        await db.execute("UPDATE users SET heat = ?, bounty = ? WHERE user_id = ?", (new_heat, new_bounty, target_id))
+        await db.execute("UPDATE users SET amnesty_count = amnesty_count + 1 WHERE user_id = ?", (user_id,))
+
+        new_amnesty = amnesty_count + 1
+        new_rank, promoted = await check_and_update_rank(db, user_id, "politician", new_amnesty, rank)
+        await db.commit()
+
+        promo_msg = f"\n🎉 <b>PROMOSI PANGKAT!</b> Selamat, Anda naik pangkat ke <b>{get_rank_title('politician', new_rank)}</b>!" if promoted else ""
+
+        text = (
+            f"🏛️ <b>KEBIJAKAN AMNESTI PUBLIK DITERBITKAN!</b>\n\n"
+            f"Subjek Penerima : <b>@{t_name}</b> (<code>{target_id}</code>)\n"
+            f"📊 Potongan Resiko: <b>{int(reduction_rate * 100)}%</b>\n"
+            f"🔥 Heat Baru    : {t_heat} ➔ <b>{new_heat}</b>\n"
+            f"🎯 Bounty Baru  : {t_bounty:,} ➔ <b>{new_bounty:,} Koin</b>\n"
+            f"🗳️ Rekor Politisi : {new_amnesty} Kebijakan Disahkan{promo_msg}"
+        )
         await update.message.reply_text(text, parse_mode="HTML")
 
 async def cmd_work(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -515,7 +1029,6 @@ async def cmd_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 j_info = JOBS[active_job]
                 
-                # Skenario Risiko Penyamaran Terbongkar Untuk Job Intel/Mole Polisi
                 if j_info.get("category") == "police" and random.randint(1, 100) <= 20:
                     jail_until = now_epoch + 7200
                     await db.execute(
@@ -1079,6 +1592,16 @@ def build_app():
     app.add_handler(CommandHandler("hit", cmd_hit))
     app.add_handler(CommandHandler("wanted", cmd_wanted))
     app.add_handler(CommandHandler("crew", cmd_crew))
+
+    # Public Career & Law Enforcement Commands
+    app.add_handler(CommandHandler("career", cmd_career))
+    app.add_handler(CommandHandler("badge", cmd_badge))
+    app.add_handler(CommandHandler("patrol", cmd_patrol))
+    app.add_handler(CommandHandler("arrest", cmd_arrest))
+    app.add_handler(CommandHandler("bail", cmd_bail))
+    app.add_handler(CommandHandler("pardon", cmd_pardon))
+    app.add_handler(CommandHandler("expose", cmd_expose))
+    app.add_handler(CommandHandler("amnesty", cmd_amnesty))
 
     # Admin Inspection Commands
     app.add_handler(CommandHandler("cek_rekening", cmd_cek_rekening_ops))
