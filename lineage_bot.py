@@ -57,7 +57,7 @@ async def get_db_connection():
         await db.close()
 
 # ==========================================
-# DATABASE INITIALIZATION
+# DATABASE INITIALIZATION & AUTO MIGRATION
 # ==========================================
 async def init_lineage_db():
     async with get_db_connection() as db:
@@ -83,6 +83,30 @@ async def init_lineage_db():
                 last_business_collect INTEGER DEFAULT 0
             )
         """)
+
+        # Safe Column Migration (Mencegah Bug sqlite3.OperationalError jika tabel users lama kekurangan kolom)
+        user_columns = [
+            ("bank_balance", "INTEGER DEFAULT 0"),
+            ("bank_loan", "INTEGER DEFAULT 0"),
+            ("vitality", "INTEGER DEFAULT 100"),
+            ("gelar_tier", "TEXT DEFAULT 'G0'"),
+            ("heat", "INTEGER DEFAULT 0"),
+            ("respect", "INTEGER DEFAULT 0"),
+            ("admin_tier", "INTEGER DEFAULT 0"),
+            ("jailed_until", "INTEGER DEFAULT 0"),
+            ("bounty", "INTEGER DEFAULT 0"),
+            ("crew_id", "INTEGER DEFAULT 0"),
+            ("last_work", "INTEGER DEFAULT 0"),
+            ("last_daily", "INTEGER DEFAULT 0"),
+            ("job_active", "TEXT"),
+            ("job_finish_time", "INTEGER DEFAULT 0"),
+            ("last_business_collect", "INTEGER DEFAULT 0")
+        ]
+        for col_name, col_type in user_columns:
+            try:
+                await db.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_type};")
+            except Exception:
+                pass  # Kolom sudah ada
 
         await db.execute("""
             CREATE TABLE IF NOT EXISTS families (
@@ -195,7 +219,7 @@ async def init_lineage_db():
             )
         """)
         await db.execute("CREATE INDEX IF NOT EXISTS idx_godparent ON godparent_relations(godparent_id)")
-        await db.execute("CREATE INDEX IF NOT EXISTS idx_godchild ON godchild_relations(godchild_id)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_godchild ON godparent_relations(godchild_id)")
 
         await db.execute("""
             CREATE TABLE IF NOT EXISTS wills (
@@ -376,7 +400,7 @@ async def is_ancestor(db, potential_ancestor_id: int, of_user_id: int, max_depth
     return False
 
 # ==========================================
-# REGISTRATION COMMAND (FITUR BARU)
+# REGISTRATION & DAILY COMMAND
 # ==========================================
 async def cmd_register(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -391,7 +415,6 @@ async def cmd_register(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode="HTML"
             )
 
-        now_epoch = int(time.time())
         await db.execute(
             """INSERT INTO users (user_id, username, koin, bank_balance, vitality, gelar_tier, respect)
                VALUES (?, ?, 10000, 0, 100, 'G0', 0)""",
@@ -405,6 +428,41 @@ async def cmd_register(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"💳 ID Kakak: <code>{user_id}</code>\n"
             f"💰 Bonus Pendaftaran: <b>10,000 Koin</b>\n\n"
             f"<i>Sekarang Kakak udah bisa pakai semua fitur keluarga & pernikahan via /start!</i>",
+            parse_mode="HTML"
+        )
+
+async def cmd_daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Fitur Baru: Klaim Koin Harian"""
+    user_id = update.effective_user.id
+    async with get_db_connection() as db:
+        if not await ensure_user_registered(update, db, user_id):
+            return
+
+        async with db.execute("SELECT last_daily FROM users WHERE user_id = ?", (user_id,)) as cursor:
+            row = await cursor.fetchone()
+            last_daily = row[0] if row and row[0] else 0
+
+        now_epoch = int(time.time())
+        cooldown = 86400  # 24 jam
+        if now_epoch - last_daily < cooldown:
+            remaining = cooldown - (now_epoch - last_daily)
+            hours, remainder = divmod(remaining, 3600)
+            minutes, seconds = divmod(remainder, 60)
+            return await update.message.reply_text(
+                f"⏳ <b>Sabar Ya Kak!</b>\n\nKakak udah klaim koin harian hari ini. "
+                f"Coba lagi dalam <b>{hours} jam {minutes} menit</b>.",
+                parse_mode="HTML"
+            )
+
+        daily_reward = 2000
+        await add_koin(db, user_id, daily_reward)
+        await db.execute("UPDATE users SET last_daily = ? WHERE user_id = ?", (now_epoch, user_id))
+        await db.commit()
+
+        await update.message.reply_text(
+            f"🎁 <b>KLAIM HARIAN BERHASIL!</b>\n\n"
+            f"Kakak mendapatkan tambahan <b>+{daily_reward:,} Koin</b>!\n"
+            f"Jangan lupa balik lagi besok ya~ 😉",
             parse_mode="HTML"
         )
 
@@ -640,6 +698,35 @@ async def cmd_reject_proposal(update: Update, context: ContextTypes.DEFAULT_TYPE
             )
         await update.message.reply_text(f"💔 Lamaran dari <code>{proposer_id}</code> resmi ditolak. Jangan berkecil hati ya!", parse_mode="HTML")
 
+async def cmd_proposals_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Fitur Baru: Melihat daftar lamaran pending"""
+    user_id = update.effective_user.id
+    async with get_db_connection() as db:
+        if not await ensure_user_registered(update, db, user_id):
+            return
+
+        now_epoch = int(time.time())
+        async with db.execute(
+            """SELECT proposal_id, proposer_id, created_at, expires_at FROM marriage_proposals
+               WHERE target_id = ? AND status = 'pending' AND expires_at > ?
+               ORDER BY proposal_id DESC""",
+            (user_id, now_epoch)
+        ) as cursor:
+            proposals = await cursor.fetchall()
+
+        if not proposals:
+            return await update.message.reply_text("💌 Belum ada lamaran pending yang masuk untuk Kakak saat ini.", parse_mode="HTML")
+
+        lines = ["💌 <b>DAFTAR LAMARAN MASUK (PENDING)</b>\n"]
+        for p_id, prop_id, c_at, exp_at in proposals:
+            prop_name = await get_username(db, prop_id)
+            rem_sec = exp_at - now_epoch
+            lines.append(f"• Dari @{prop_name} (<code>{prop_id}</code>) — Sisa Waktu: {rem_sec // 60}m {rem_sec % 60}s")
+            lines.append(f"  👉 Terima: <code>/accept_proposal {prop_id}</code>")
+            lines.append(f"  👉 Tolak: <code>/reject_proposal {prop_id}</code>\n")
+
+        await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
 async def cmd_divorce(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     async with get_db_connection() as db:
@@ -696,6 +783,34 @@ async def cmd_marriage_status(update: Update, context: ContextTypes.DEFAULT_TYPE
             f"Gunakan <code>/divorce</code> kalau mau kembali melajang.",
             parse_mode="HTML"
         )
+
+async def cmd_marriage_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Fitur Baru: Riwayat Mantan Pasangan"""
+    user_id = update.effective_user.id
+    async with get_db_connection() as db:
+        if not await ensure_user_registered(update, db, user_id):
+            return
+
+        async with db.execute(
+            """SELECT cert_number, user_a_id, user_b_id, married_at, divorced_at, divorce_reason
+               FROM marriages
+               WHERE status = 'divorced' AND (user_a_id = ? OR user_b_id = ?)
+               ORDER BY divorced_at DESC LIMIT 10""",
+            (user_id, user_id)
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+        if not rows:
+            return await update.message.reply_text("📜 Kakak belum punya riwayat mantan / perceraian sebelumnya.", parse_mode="HTML")
+
+        lines = ["📜 <b>RIWAYAT MANTAN PASANGAN (10 Terakhir)</b>\n"]
+        for cert, u_a, u_b, m_at, d_at, reason in rows:
+            ex_id = u_b if user_id == u_a else u_a
+            ex_name = await get_username(db, ex_id)
+            d_date = datetime.fromtimestamp(d_at, WIB).strftime("%d %b %Y") if d_at else "-"
+            lines.append(f"• Ex: @{ex_name} (<code>{ex_id}</code>)\n  📜 Cert: <code>{cert}</code>\n  🗓️ Cerai: {d_date} ({reason})\n")
+
+        await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 # ==========================================
 # FAMILY COMMANDS
@@ -1679,14 +1794,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Saya Resepsionis siap bantu Kakak mengurus pendaftaran, pernikahan, silsilah keluarga, sampai urusan warisan!\n\n"
         "📝 <b>Pendaftaran & Utilitas:</b>\n"
         "/register — Daftar akun di Cosa Nostra\n"
+        "/daily — Klaim bonus koin harian gratis\n"
         "/my_id — Cek ID Telegram Kakak\n"
         "/tree [user_id] — Cek diagram pohon silsilah keluarga\n\n"
         "💍 <b>Layanan Pernikahan:</b>\n"
         "/propose [user_id] — Lamar doi\n"
         "/accept_proposal [user_id] — Terima lamaran\n"
         "/reject_proposal [user_id] — Tolak lamaran\n"
+        "/proposals_list — Cek daftar lamaran pending\n"
         "/divorce — Cerai (kembali melajang)\n"
-        "/marriage_status — Cek status pernikahan\n\n"
+        "/marriage_status — Cek status pernikahan aktif\n"
+        "/marriage_history — Lihat riwayat mantan/pernikahan lalu\n\n"
         "🏛️ <b>Layanan Keluarga:</b>\n"
         "/create_family [nama] — Dirikan keluarga baru\n"
         "/family — Cek info keluarga\n"
@@ -1728,8 +1846,9 @@ def build_app():
 
     app.add_handler(CommandHandler("start", start))
 
-    # Registration & Utility (NEW)
+    # Registration & Utility
     app.add_handler(CommandHandler("register", cmd_register))
+    app.add_handler(CommandHandler("daily", cmd_daily))
     app.add_handler(CommandHandler("my_id", cmd_my_id))
     app.add_handler(CommandHandler("tree", cmd_tree))
 
@@ -1737,8 +1856,10 @@ def build_app():
     app.add_handler(CommandHandler("propose", cmd_propose))
     app.add_handler(CommandHandler("accept_proposal", cmd_accept_proposal))
     app.add_handler(CommandHandler("reject_proposal", cmd_reject_proposal))
+    app.add_handler(CommandHandler("proposals_list", cmd_proposals_list))
     app.add_handler(CommandHandler("divorce", cmd_divorce))
     app.add_handler(CommandHandler("marriage_status", cmd_marriage_status))
+    app.add_handler(CommandHandler("marriage_history", cmd_marriage_history))
 
     # Family
     app.add_handler(CommandHandler("create_family", cmd_create_family))
