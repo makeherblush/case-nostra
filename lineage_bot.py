@@ -55,7 +55,7 @@ BLACKLISTED_FAMILY_NAMES = {
     "COSA NOSTRA", "COSA_NOSTRA", "COSA NOSTRA OFFICIAL", "OWNER", "STAFF",
 }
 
-MY_PERMANENT_OWNER_ID = 8396793986  # sinkron dengan operation_bot.py
+MY_PERMANENT_OWNER_ID = 8396793986  
 
 # ==========================================
 # HELPER KONEKSI DATABASE
@@ -313,7 +313,7 @@ async def global_error_handler(update: object, context: ContextTypes.DEFAULT_TYP
         )
 
 # ==========================================
-# SHARED HELPERS & REGISTRATION CHECK
+# SHARED HELPERS & NET WORTH CALCULATOR
 # ==========================================
 async def check_admin_tier(db, user_id: int) -> int:
     if user_id == MY_PERMANENT_OWNER_ID:
@@ -363,6 +363,34 @@ async def get_koin(db, user_id: int) -> int:
 
 async def add_koin(db, user_id: int, amount: int):
     await db.execute("UPDATE users SET koin = koin + ? WHERE user_id = ?", (amount, user_id))
+
+async def calculate_net_worth(db, user_id: int) -> tuple:
+    """
+    Menghitung total kekayaan bersih (Net Worth):
+    Net Worth = Koin Tunai + Saldo Bank + (Vault Keluarga jika Kepala Keluarga).
+    """
+    try:
+        async with db.execute("SELECT koin, bank_balance FROM users WHERE user_id = ?", (user_id,)) as cursor:
+            row = await cursor.fetchone()
+            koin = row[0] if row else 0
+            bank = row[1] if row else 0
+
+        vault_share = 0
+        async with db.execute(
+            """SELECT f.family_vault_balance 
+               FROM families f 
+               JOIN family_members fm ON f.family_id = fm.family_id 
+               WHERE fm.user_id = ? AND fm.relation_type = 'head' AND fm.is_active = 1""",
+            (user_id,)
+        ) as cursor:
+            v_row = await cursor.fetchone()
+            if v_row:
+                vault_share = v_row[0]
+
+        total_net_worth = koin + bank + vault_share
+        return total_net_worth, koin, bank, vault_share
+    except Exception:
+        return 0, 0, 0, 0
 
 def parse_target_id(context) -> int:
     if not context.args or not context.args[0].lstrip("-").isdigit():
@@ -545,6 +573,8 @@ async def reg_tgl_lahir(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await db.commit()
 
+        net_worth, koin, bank, vault = await calculate_net_worth(db, user_id)
+
     ktp_card = (
         "🪪 <b>KARTU TANDA PENDUKUK (KTP) DIGITAL</b>\n"
         "🏛️ <b>KOTA COSA NOSTRA</b>\n"
@@ -557,7 +587,8 @@ async def reg_tgl_lahir(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"💼 <b>Gelar / Profesi:</b> {gelar}\n"
         "──────────────────────────────\n"
         f"💳 <b>ID Citizen   :</b> <code>{user_id}</code>\n"
-        f"💰 <b>Saldo Awal   :</b> 10,000 Koin\n\n"
+        f"💰 <b>Koin Dompet  :</b> {koin:,} Koin\n"
+        f"💎 <b>Total Kekayaan:</b> {net_worth:,} Koin\n\n"
         "🎉 <i>Pendaftaran KTP Berhasil! Status kamu otomatis LAJANG.\n"
         "⚠️ <b>Catatan:</b> Jika ada kesalahan saat memasukkan data KTP, segera hubungi Admin untuk melakukan perbaikan!</i>"
     )
@@ -658,13 +689,14 @@ async def edit_ktp_admin_value(update: Update, context: ContextTypes.DEFAULT_TYP
         await db.commit()
 
         async with db.execute(
-            """SELECT nama_lengkap, muse, umur, tanggal_lahir, status_sipil, gelar_tier, koin 
+            """SELECT nama_lengkap, muse, umur, tanggal_lahir, status_sipil, gelar_tier 
                FROM users WHERE user_id = ?""",
             (target_id,)
         ) as cursor:
             row = await cursor.fetchone()
 
-    nama, muse, umur, tgl, status_sipil, gelar, koin = row
+        nama, muse, umur, tgl, status_sipil, gelar = row
+        net_worth, koin, bank, vault = await calculate_net_worth(db, target_id)
 
     ktp_card = (
         "✅ <b>DATA KTP WARGA BERHASIL DIPERBARUI OLEH ADMIN!</b>\n\n"
@@ -679,14 +711,15 @@ async def edit_ktp_admin_value(update: Update, context: ContextTypes.DEFAULT_TYP
         f"💼 <b>Gelar / Profesi:</b> {gelar}\n"
         "──────────────────────────────\n"
         f"💳 <b>ID Citizen   :</b> <code>{target_id}</code>\n"
-        f"💰 <b>Koin Dompet  :</b> {koin:,} Koin"
+        f"💰 <b>Koin Dompet  :</b> {koin:,} Koin\n"
+        f"💎 <b>Total Kekayaan:</b> {net_worth:,} Koin"
     )
 
     await update.message.reply_text(ktp_card, parse_mode="HTML")
     return ConversationHandler.END
 
 # ==========================================
-# COMMAND VIEW KTP
+# COMMAND VIEW KTP & NET WORTH
 # ==========================================
 async def cmd_ktp(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -698,13 +731,14 @@ async def cmd_ktp(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return await update.message.reply_text(f"❌ User <code>{target_id}</code> belum terdaftar KTP.", parse_mode="HTML")
 
         async with db.execute(
-            """SELECT nama_lengkap, muse, umur, tanggal_lahir, status_sipil, gelar_tier, koin 
+            """SELECT nama_lengkap, muse, umur, tanggal_lahir, status_sipil, gelar_tier 
                FROM users WHERE user_id = ?""",
             (target_id,)
         ) as cursor:
             row = await cursor.fetchone()
 
-        nama, muse, umur, tgl, status_sipil, gelar, koin = row
+        nama, muse, umur, tgl, status_sipil, gelar = row
+        net_worth, koin, bank, vault = await calculate_net_worth(db, target_id)
 
         ktp_card = (
             "🪪 <b>KARTU TANDA PENDUKUK (KTP) DIGITAL</b>\n"
@@ -718,9 +752,44 @@ async def cmd_ktp(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"💼 <b>Gelar / Profesi:</b> {gelar}\n"
             "──────────────────────────────\n"
             f"💳 <b>ID Citizen   :</b> <code>{target_id}</code>\n"
-            f"💰 <b>Koin Dompet  :</b> {koin:,} Koin"
+            f"💵 <b>Koin Dompet  :</b> {koin:,} Koin\n"
+            f"💎 <b>Total Kekayaan:</b> <b>{net_worth:,} Koin</b>"
         )
         await update.message.reply_text(ktp_card, parse_mode="HTML")
+
+async def cmd_networth(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Fitur Khusus: Menampilkan Rincian Detail Kekayaan Bersih (Net Worth)."""
+    user_id = update.effective_user.id
+    target_id = parse_target_id(context) or user_id
+
+    async with get_db_connection() as db:
+        await ensure_all_tables_exist(db)
+        if not await user_exists(db, target_id):
+            return await update.message.reply_text(f"❌ User <code>{target_id}</code> belum terdaftar.", parse_mode="HTML")
+
+        target_name = await get_username(db, target_id)
+        net_worth, koin, bank, vault = await calculate_net_worth(db, target_id)
+
+        status_ekonomi = "Warga Klasik"
+        if net_worth > 50_000_000:
+            status_ekonomi = "👑 Konglomerat Dinasti"
+        elif net_worth > 10_000_000:
+            status_ekonomi = "💼 Eksekutif Elit"
+        elif net_worth > 1_000_000:
+            status_ekonomi = "💵 Kelas Menengah Atas"
+
+        text = (
+            f"💎 <b>LAPORAN KEKAYAAN BERSIH (NET WORTH)</b>\n"
+            f"Target: <b>@{target_name}</b> (<code>{target_id}</code>)\n"
+            f"──────────────────────────────\n"
+            f"💵 Cash Tunai   : <b>{koin:,} Koin</b>\n"
+            f"🏦 Tabungan Bank : <b>{bank:,} Koin</b>\n"
+            f"🏛️ Vault Dinasti : <b>{vault:,} Koin</b>\n"
+            f"──────────────────────────────\n"
+            f"🏆 <b>TOTAL NET WORTH : {net_worth:,} Koin</b>\n"
+            f"📊 Status Ekonomi : <b>{status_ekonomi}</b>"
+        )
+        await update.message.reply_text(text, parse_mode="HTML")
 
 # ==========================================
 # FITUR: PENDAFTARAN NIKAH MANUAL
@@ -2118,17 +2187,71 @@ async def cmd_lineage_admin_panel(update: Update, context: ContextTypes.DEFAULT_
             f"Level Otoritas Anda: <b>Tier {tier}</b>\n\n"
             f"<b>Fitur Admin:</b>\n"
             f"• <code>/edit_ktp [user_id]</code> — Edit KTP warga (Tier 1+)\n"
-            f"• <code>/rename_family [family_id] [nama_baru]</code> — Ubah nama keluarga (Tier 2+)\n"
+            f"• <code>/audit_kekayaan [user_id]</code> — Audit finansial warga (Tier 1+)\n"
+            f"• <code>/set_koin_admin [user_id] [koin]</code> (Tier 2+)\n"
+            f"• <code>/rename_family [family_id] [nama_baru]</code> (Tier 2+)\n"
             f"• <code>/lock_family [family_id] [alasan]</code> (Tier 2+)\n"
             f"• <code>/unlock_family [family_id]</code> (Tier 2+)\n"
             f"• <code>/force_divorce [user_id]</code> (Tier 2+)\n\n"
             f"<b>Aksi Berat:</b>\n"
-            f"• <code>/excommunicate [user_id] [alasan]</code> — submit request (Tier 3+)\n"
-            f"• <code>/approve_action [action_id]</code> — approve & eksekusi (Tier 3+)\n\n"
+            f"• <code>/excommunicate [user_id] [alasan]</code> (Tier 3+)\n"
+            f"• <code>/approve_action [action_id]</code> (Tier 3+)\n\n"
             f"<b>Cheat:</b>\n"
             f"• <code>/cheat_set_loyalty [user_id] [score]</code> (Tier 1+)"
         )
         await update.message.reply_text(text, parse_mode="HTML")
+
+async def cmd_audit_kekayaan(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Fitur Admin untuk memeriksa audit finansial dan net worth warga."""
+    user_id = update.effective_user.id
+    async with get_db_connection() as db:
+        await ensure_all_tables_exist(db)
+        if await check_admin_tier(db, user_id) < 1:
+            return await update.message.reply_text("🚫 Butuh akses Admin Tier 1+.")
+
+        if not context.args or not context.args[0].isdigit():
+            return await update.message.reply_text("❌ Format: <code>/audit_kekayaan [target_id]</code>", parse_mode="HTML")
+
+        target_id = int(context.args[0])
+        if not await user_exists(db, target_id):
+            return await update.message.reply_text(f"❌ User <code>{target_id}</code> tidak ditemukan.", parse_mode="HTML")
+
+        target_name = await get_username(db, target_id)
+        net_worth, koin, bank, vault = await calculate_net_worth(db, target_id)
+
+        text = (
+            f"🔍 <b>FINANCIAL AUDIT REPORT</b>\n\n"
+            f"Target ID: <code>{target_id}</code> (@{target_name})\n"
+            f"──────────────────────────────\n"
+            f"💵 Saldo Tunai: <b>{koin:,} Koin</b>\n"
+            f"🏦 Saldo Bank: <b>{bank:,} Koin</b>\n"
+            f"🏛️ Aset Vault Head: <b>{vault:,} Koin</b>\n"
+            f"──────────────────────────────\n"
+            f"💎 <b>TOTAL NET WORTH: {net_worth:,} Koin</b>"
+        )
+        await update.message.reply_text(text, parse_mode="HTML")
+
+async def cmd_set_koin_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Fitur Admin untuk mengatur ulang saldo koin tunai warga."""
+    user_id = update.effective_user.id
+    if len(context.args) < 2 or not context.args[0].isdigit() or not context.args[1].isdigit():
+        return await update.message.reply_text("❌ Format: <code>/set_koin_admin [target_id] [jumlah_koin]</code>", parse_mode="HTML")
+
+    target_id = int(context.args[0])
+    amount = int(context.args[1])
+
+    async with get_db_connection() as db:
+        await ensure_all_tables_exist(db)
+        if await check_admin_tier(db, user_id) < 2:
+            return await update.message.reply_text("🚫 Butuh akses Admin Tier 2+.")
+
+        if not await user_exists(db, target_id):
+            return await update.message.reply_text(f"❌ User <code>{target_id}</code> tidak terdaftar.", parse_mode="HTML")
+
+        await db.execute("UPDATE users SET koin = ? WHERE user_id = ?", (amount, target_id))
+        await db.commit()
+
+        await update.message.reply_text(f"✅ <b>ADMIN CONTROL:</b> Saldo Koin <code>{target_id}</code> diset menjadi <b>{amount:,} Koin</b>.", parse_mode="HTML")
 
 async def cmd_rename_family(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -2375,7 +2498,8 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
         text = (
             "📝 <b>SUB-MENU PENDAFTARAN & UTILITAS</b>\n\n"
             "• <code>/register</code> — Daftar KTP Citizen baru\n"
-            "• <code>/ktp [user_id]</code> — Cek Kartu Identitas KTP Digital\n"
+            "• <code>/ktp [user_id]</code> — Cek Kartu Identitas KTP Digital & Net Worth\n"
+            "• <code>/networth [user_id]</code> — Detail rincian kekayaan bersih\n"
             "• <code>/daily</code> — Klaim bonus koin harian gratis\n"
             "• <code>/my_id</code> — Cek ID Telegram Kakak\n"
             "• <code>/tree [user_id]</code> — Cek diagram visual pohon silsilah keluarga\n\n"
@@ -2456,6 +2580,8 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
                 f"Level Otoritas Anda: <b>Tier {tier}</b>\n\n"
                 f"<b>Fitur Admin:</b>\n"
                 f"• <code>/edit_ktp [user_id]</code> (Tier 1+)\n"
+                f"• <code>/audit_kekayaan [user_id]</code> (Tier 1+)\n"
+                f"• <code>/set_koin_admin [user_id] [koin]</code> (Tier 2+)\n"
                 f"• <code>/rename_family [family_id] [nama_baru]</code> (Tier 2+)\n"
                 f"• <code>/lock_family [family_id] [alasan]</code> (Tier 2+)\n"
                 f"• <code>/unlock_family [family_id]</code> (Tier 2+)\n"
@@ -2506,6 +2632,8 @@ def build_app():
 
     # Registration & Utility
     app.add_handler(CommandHandler("ktp", cmd_ktp))
+    app.add_handler(CommandHandler("networth", cmd_networth))
+    app.add_handler(CommandHandler("kekayaan", cmd_networth))
     app.add_handler(CommandHandler("daily", cmd_daily))
     app.add_handler(CommandHandler("my_id", cmd_my_id))
     app.add_handler(CommandHandler("tree", cmd_tree))
@@ -2551,8 +2679,10 @@ def build_app():
     app.add_handler(CommandHandler("cancel_will", cmd_cancel_will))
     app.add_handler(CommandHandler("retire", cmd_retire))
 
-    # Admin
+    # Admin Inspection & Control
     app.add_handler(CommandHandler("lineage_admin_panel", cmd_lineage_admin_panel))
+    app.add_handler(CommandHandler("audit_kekayaan", cmd_audit_kekayaan))
+    app.add_handler(CommandHandler("set_koin_admin", cmd_set_koin_admin))
     app.add_handler(CommandHandler("rename_family", cmd_rename_family))
     app.add_handler(CommandHandler("lock_family", cmd_lock_family))
     app.add_handler(CommandHandler("unlock_family", cmd_unlock_family))
