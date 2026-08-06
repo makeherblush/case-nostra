@@ -195,7 +195,7 @@ async def init_lineage_db():
             )
         """)
         await db.execute("CREATE INDEX IF NOT EXISTS idx_godparent ON godparent_relations(godparent_id)")
-        await db.execute("CREATE INDEX IF NOT EXISTS idx_godchild ON godparent_relations(godchild_id)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_godchild ON godchild_relations(godchild_id)")
 
         await db.execute("""
             CREATE TABLE IF NOT EXISTS wills (
@@ -298,7 +298,7 @@ async def ensure_user_registered(update: Update, db, user_id: int) -> bool:
             "💁‍♀️ <b>Aduh Kak, Nama Kakak Belum Ada di Buku Tamu!</b>\n\n"
             "Kakak belum terdaftar di database Cosa Nostra nih. Gimana mau nikah atau mendaftar keluarga kalau belum punya KTP-nya?\n\n"
             "👉 <b>Yuk daftar dulu:</b>\n"
-            "Ketik perintah <code>/register</code> di bot utama atau minta Admin buat daftarin Kakak ya. "
+            "Ketik perintah <code>/register</code> langsung di sini atau di bot utama ya! "
             "Habis itu baru deh bergaul dan cari pasangan! 😉",
             parse_mode="HTML"
         )
@@ -374,6 +374,110 @@ async def is_ancestor(db, potential_ancestor_id: int, of_user_id: int, max_depth
         frontier = next_frontier
         depth += 1
     return False
+
+# ==========================================
+# REGISTRATION COMMAND (FITUR BARU)
+# ==========================================
+async def cmd_register(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    username = update.effective_user.username or update.effective_user.first_name
+
+    async with get_db_connection() as db:
+        if await user_exists(db, user_id):
+            return await update.message.reply_text(
+                f"💁‍♀️ <b>Eits, Kakak Udah Terdaftar Kok!</b>\n\n"
+                f"ID Kakak (<code>{user_id}</code>) udah dicatat di buku tamu Cosa Nostra. "
+                f"Langsung aja cari pasangan atau gabung keluarga pakai perintah <code>/start</code>!",
+                parse_mode="HTML"
+            )
+
+        now_epoch = int(time.time())
+        await db.execute(
+            """INSERT INTO users (user_id, username, koin, bank_balance, vitality, gelar_tier, respect)
+               VALUES (?, ?, 10000, 0, 100, 'G0', 0)""",
+            (user_id, username)
+        )
+        await db.commit()
+
+        await update.message.reply_text(
+            f"🎉 <b>PENDAFTARAN BERHASIL!</b>\n\n"
+            f"Selamat datang di Cosa Nostra, @{username}!\n"
+            f"💳 ID Kakak: <code>{user_id}</code>\n"
+            f"💰 Bonus Pendaftaran: <b>10,000 Koin</b>\n\n"
+            f"<i>Sekarang Kakak udah bisa pakai semua fitur keluarga & pernikahan via /start!</i>",
+            parse_mode="HTML"
+        )
+
+# ==========================================
+# UTILITY / NEW FEATURES
+# ==========================================
+async def cmd_my_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    await update.message.reply_text(
+        f"💳 <b>INFO ID TELEGRAM</b>\n\nID Anda: <code>{user_id}</code>\n"
+        f"Gunakan ID ini untuk keperluan lamaran atau administrasi keluarga.",
+        parse_mode="HTML"
+    )
+
+async def cmd_tree(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Menampilkan ringkasan visual pohon silsilah keluarga singkat."""
+    user_id = update.effective_user.id
+    target_id = parse_target_id(context) or user_id
+
+    async with get_db_connection() as db:
+        if not await ensure_user_registered(update, db, user_id):
+            return
+
+        target_name = await get_username(db, target_id)
+
+        # Cek Pasangan
+        marriage = await get_active_marriage(db, target_id)
+        spouse_str = "Belum Ada"
+        if marriage:
+            spouse_id = marriage[3] if marriage[2] == target_id else marriage[2]
+            spouse_name = await get_username(db, spouse_id)
+            spouse_str = f"@{spouse_name} (<code>{spouse_id}</code>)"
+
+        # Cek Anak
+        async with db.execute(
+            "SELECT child_id, relation_type FROM parent_child_relations WHERE parent_id = ? AND is_active = 1",
+            (target_id,)
+        ) as cursor:
+            children = await cursor.fetchall()
+
+        # Cek Saudara
+        async with db.execute(
+            """SELECT user_a_id, user_b_id, sibling_type FROM sibling_relations
+               WHERE (user_a_id = ? OR user_b_id = ?) AND is_active = 1""",
+            (target_id, target_id)
+        ) as cursor:
+            siblings = await cursor.fetchall()
+
+        tree_lines = [
+            f"🌳 <b>POHON SILSILAH KELUARGA</b>",
+            f"👤 <b>{target_name}</b> (<code>{target_id}</code>)",
+            f" ┣ 💍 Pasangan: {spouse_str}"
+        ]
+
+        # Render Saudara
+        if siblings:
+            tree_lines.append(" ┣ 👫 <b>Saudara:</b>")
+            for a_id, b_id, s_type in siblings:
+                s_id = b_id if a_id == target_id else a_id
+                s_name = await get_username(db, s_id)
+                tree_lines.append(f" ┃  • @{s_name} (<code>{s_id}</code>) [{s_type}]")
+
+        # Render Anak
+        if children:
+            tree_lines.append(" ┗ 👶 <b>Anak-Anak:</b>")
+            for c_id, c_type in children:
+                c_name = await get_username(db, c_id)
+                label = "Kandung" if c_type == "biological" else "Angkat"
+                tree_lines.append(f"    • @{c_name} (<code>{c_id}</code>) [{label}]")
+        else:
+            tree_lines.append(" ┗ 👶 Anak: Belum ada")
+
+        await update.message.reply_text("\n".join(tree_lines), parse_mode="HTML")
 
 # ==========================================
 # MARRIAGE COMMANDS
@@ -749,7 +853,7 @@ async def cmd_leave_family(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         family_id, relation_type, loyalty_score = membership
         if relation_type == "head":
-            return await update.message.reply_text("🚫 Kepala keluarga nggak bisa keluar gitu aja Kak. Transfer dulu kepemimpinannya ya!")
+            return await update.message.reply_text("🚫 Kepala keluarga nggak bisa keluar gitu aja Kak. Transfer dulu kepemimpinannya ya via <code>/transfer_head</code>!")
 
         now_epoch = int(time.time())
         await db.execute(
@@ -1017,6 +1121,174 @@ async def cmd_in_laws(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 # ==========================================
+# ADVANCED FAMILY MANAGEMENT
+# ==========================================
+async def cmd_deposit_vault(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if not context.args or not context.args[0].isdigit():
+        return await update.message.reply_text("💁‍♀️ Format: <code>/deposit_vault [jumlah_koin]</code>", parse_mode="HTML")
+
+    amount = int(context.args[0])
+    if amount <= 0:
+        return await update.message.reply_text("❌ Jumlah koin harus lebih besar dari 0 Kak.")
+
+    async with get_db_connection() as db:
+        if not await ensure_user_registered(update, db, user_id):
+            return
+
+        membership = await get_active_family_membership(db, user_id)
+        if not membership:
+            return await update.message.reply_text("❌ Kakak belum bergabung dengan keluarga mana pun.")
+
+        family_id = membership[0]
+
+        async with db.execute("SELECT is_locked FROM families WHERE family_id = ?", (family_id,)) as cursor:
+            fam = await cursor.fetchone()
+            if fam and fam[0] == 1:
+                return await update.message.reply_text("🔒 Vault keluarga sedang dikunci oleh Administrator.")
+
+        user_koin = await get_koin(db, user_id)
+        if user_koin < amount:
+            return await update.message.reply_text(f"❌ Koin Kakak kurang! Saldo dompet Kakak cuma <b>{user_koin:,} Koin</b>.", parse_mode="HTML")
+
+        await add_koin(db, user_id, -amount)
+        await db.execute("UPDATE families SET family_vault_balance = family_vault_balance + ? WHERE family_id = ?", (amount, family_id))
+        await db.commit()
+
+        await update.message.reply_text(f"💰 Berhasil menyetor <b>{amount:,} Koin</b> ke Vault Keluarga!", parse_mode="HTML")
+
+async def cmd_withdraw_vault(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if not context.args or not context.args[0].isdigit():
+        return await update.message.reply_text("💁‍♀️ Format: <code>/withdraw_vault [jumlah_koin]</code>", parse_mode="HTML")
+
+    amount = int(context.args[0])
+    if amount <= 0:
+        return await update.message.reply_text("❌ Jumlah koin harus lebih besar dari 0 Kak.")
+
+    async with get_db_connection() as db:
+        if not await ensure_user_registered(update, db, user_id):
+            return
+
+        membership = await get_active_family_membership(db, user_id)
+        if not membership:
+            return await update.message.reply_text("❌ Kakak belum bergabung dengan keluarga mana pun.")
+
+        family_id, relation_type, _ = membership
+        if relation_type != "head":
+            return await update.message.reply_text("🚫 Penarikan dana kas keluarga hanya bisa dilakukan oleh Kepala Keluarga (<code>head</code>).", parse_mode="HTML")
+
+        async with db.execute("SELECT family_vault_balance, is_locked FROM families WHERE family_id = ?", (family_id,)) as cursor:
+            fam = await cursor.fetchone()
+
+        if not fam:
+            return await update.message.reply_text("❌ Data keluarga tidak ditemukan.")
+
+        vault_balance, is_locked = fam
+        if is_locked == 1:
+            return await update.message.reply_text("🔒 Vault keluarga sedang dikunci oleh Administrator.")
+
+        if vault_balance < amount:
+            return await update.message.reply_text(f"❌ Kas Vault Keluarga tidak mencukupi! Saldo vault cuma <b>{vault_balance:,} Koin</b>.", parse_mode="HTML")
+
+        await db.execute("UPDATE families SET family_vault_balance = family_vault_balance - ? WHERE family_id = ?", (amount, family_id))
+        await add_koin(db, user_id, amount)
+        await db.commit()
+
+        await update.message.reply_text(f"💸 Berhasil menarik <b>{amount:,} Koin</b> dari Vault Keluarga ke dompet Kakak!", parse_mode="HTML")
+
+async def cmd_set_family_tax(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if not context.args or not context.args[0].replace('.', '', 1).isdigit():
+        return await update.message.reply_text("💁‍♀️ Format: <code>/set_family_tax [persen_0_sampai_100]</code>", parse_mode="HTML")
+
+    tax_rate = float(context.args[0])
+    if not (0.0 <= tax_rate <= 100.0):
+        return await update.message.reply_text("❌ Persentase pajak harus di antara 0% sampai 100%.")
+
+    async with get_db_connection() as db:
+        if not await ensure_user_registered(update, db, user_id):
+            return
+
+        membership = await get_active_family_membership(db, user_id)
+        if not membership or membership[1] != "head":
+            return await update.message.reply_text("🚫 Pengaturan pajak keluarga hanya bisa diatur oleh Kepala Keluarga.", parse_mode="HTML")
+
+        family_id = membership[0]
+        await db.execute("UPDATE families SET tax_rate_percent = ? WHERE family_id = ?", (tax_rate, family_id))
+        await db.commit()
+
+        await update.message.reply_text(f"📊 Tarif pajak keluarga berhasil diperbarui menjadi <b>{tax_rate}%</b>.", parse_mode="HTML")
+
+async def cmd_transfer_head(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    target_id = parse_target_id(context)
+    if target_id is None:
+        return await update.message.reply_text("💁‍♀️ Format: <code>/transfer_head [user_id_penerus]</code>", parse_mode="HTML")
+
+    if target_id == user_id:
+        return await update.message.reply_text("😅 Kakak kan udah jadi Kepala Keluarga!")
+
+    async with get_db_connection() as db:
+        if not await ensure_user_registered(update, db, user_id):
+            return
+
+        membership = await get_active_family_membership(db, user_id)
+        if not membership or membership[1] != "head":
+            return await update.message.reply_text("🚫 Hanya Kepala Keluarga yang dapat mentransfer kepemimpinan.", parse_mode="HTML")
+
+        family_id = membership[0]
+
+        target_membership = await get_active_family_membership(db, target_id)
+        if not target_membership or target_membership[0] != family_id:
+            return await update.message.reply_text("❌ Target bukan anggota aktif dari keluarga Kakak.")
+
+        await db.execute("UPDATE families SET head_user_id = ? WHERE family_id = ?", (target_id, family_id))
+        await db.execute("UPDATE family_members SET relation_type = 'member' WHERE family_id = ? AND user_id = ?", (family_id, user_id))
+        await db.execute("UPDATE family_members SET relation_type = 'head' WHERE family_id = ? AND user_id = ?", (family_id, target_id))
+        await db.commit()
+
+        target_name = await get_username(db, target_id)
+        await update.message.reply_text(
+            f"👑 <b>TAHTA DITERUSKAN!</b>\n\nSelamat kepada @{target_name} (<code>{target_id}</code>) yang kini resmi menjadi Kepala Keluarga!",
+            parse_mode="HTML"
+        )
+
+async def cmd_kick_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    target_id = parse_target_id(context)
+    if target_id is None:
+        return await update.message.reply_text("💁‍♀️ Format: <code>/kick_member [user_id] [alasan]</code>", parse_mode="HTML")
+
+    if target_id == user_id:
+        return await update.message.reply_text("😅 Mau ngeluarin diri sendiri? Gunakan <code>/leave_family</code> aja Kak!")
+
+    reason = " ".join(context.args[1:]).strip() if len(context.args) > 1 else "Dikeluarkan oleh Head"
+
+    async with get_db_connection() as db:
+        if not await ensure_user_registered(update, db, user_id):
+            return
+
+        membership = await get_active_family_membership(db, user_id)
+        if not membership or membership[1] != "head":
+            return await update.message.reply_text("🚫 Hanya Kepala Keluarga yang berhak mengeluarkan anggota.", parse_mode="HTML")
+
+        family_id = membership[0]
+        target_membership = await get_active_family_membership(db, target_id)
+        if not target_membership or target_membership[0] != family_id:
+            return await update.message.reply_text("❌ Target bukan anggota aktif di keluarga Kakak.")
+
+        now_epoch = int(time.time())
+        await db.execute(
+            "UPDATE family_members SET is_active = 0, left_at = ?, left_reason = ? WHERE family_id = ? AND user_id = ?",
+            (now_epoch, f"kicked: {reason}", family_id, target_id)
+        )
+        await db.commit()
+
+        target_name = await get_username(db, target_id)
+        await update.message.reply_text(f"👞 @{target_name} (<code>{target_id}</code>) telah dikeluarkan dari keluarga.\nAlasan: {reason}", parse_mode="HTML")
+
+# ==========================================
 # INHERITANCE / WILL COMMANDS
 # ==========================================
 async def cmd_will(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1144,9 +1416,31 @@ async def cmd_will_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
             exec_date = datetime.fromtimestamp(executed_at, WIB).strftime("%d %B %Y, %H:%M WIB")
             lines.append(f"\n✅ <b>SUDAH DIEKSEKUSI pada:</b> {exec_date}")
         else:
-            lines.append("\n💾 Gunakan <code>/retire</code> untuk mengeksekusi wasiat ini")
+            lines.append("\n💾 Gunakan <code>/retire</code> untuk mengeksekusi wasiat ini atau <code>/cancel_will</code> untuk membatalkan.")
             
         await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_cancel_will(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    async with get_db_connection() as db:
+        if not await ensure_user_registered(update, db, user_id):
+            return
+
+        async with db.execute("SELECT will_id, status FROM wills WHERE owner_id = ?", (user_id,)) as cursor:
+            will = await cursor.fetchone()
+
+        if not will:
+            return await update.message.reply_text("📜 Kakak memang belum memiliki surat wasiat.")
+
+        will_id, status = will
+        if status == "executed":
+            return await update.message.reply_text("❌ Surat wasiat yang sudah dieksekusi tidak dapat dibatalkan.")
+
+        await db.execute("DELETE FROM will_beneficiaries WHERE will_id = ?", (will_id,))
+        await db.execute("DELETE FROM wills WHERE will_id = ?", (will_id,))
+        await db.commit()
+
+        await update.message.reply_text("🗑️ Surat wasiat Kakak telah resmi dibatalkan dan dihapus.", parse_mode="HTML")
 
 async def cmd_retire(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -1382,8 +1676,11 @@ async def cmd_cheat_set_loyalty(update: Update, context: ContextTypes.DEFAULT_TY
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         "💁‍♀️ <b>HALO KAK! SELAMAT DATANG DI COSA NOSTRA LINEAGE BOT!</b>\n\n"
-        "Saya Resepsionis siap bantu Kakak mengurus pernikahan, silsilah keluarga, sampai urusan warisan! "
-        "Kalau Kakak masih jomblo, yuk bergaul dulu dan ajak kenalan member lain ya! 😉\n\n"
+        "Saya Resepsionis siap bantu Kakak mengurus pendaftaran, pernikahan, silsilah keluarga, sampai urusan warisan!\n\n"
+        "📝 <b>Pendaftaran & Utilitas:</b>\n"
+        "/register — Daftar akun di Cosa Nostra\n"
+        "/my_id — Cek ID Telegram Kakak\n"
+        "/tree [user_id] — Cek diagram pohon silsilah keluarga\n\n"
         "💍 <b>Layanan Pernikahan:</b>\n"
         "/propose [user_id] — Lamar doi\n"
         "/accept_proposal [user_id] — Terima lamaran\n"
@@ -1405,11 +1702,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/godparent [user_id] — Tunjuk godparent\n"
         "/revoke_godparent [user_id] — Cabut status godparent\n"
         "/my_godchildren — Lihat daftar godchildren\n"
-        "/in_laws — Lihat keluarga pasangan (mertua/ipar)\n\n"
+        "/in_laws — Lihat keluarga pasangan (mertua/ipar)\n"
+        "/deposit_vault [jumlah] — Setor koin ke kas keluarga\n"
+        "/withdraw_vault [jumlah] — Tarik koin dari kas keluarga (Head)\n"
+        "/set_family_tax [0-100] — Atur pajak keluarga (Head)\n"
+        "/transfer_head [user_id] — Transfer kepemimpinan keluarga\n"
+        "/kick_member [user_id] — Keluarkan anggota (Head)\n\n"
         "⚰️ <b>Layanan Warisan & Pensiun:</b>\n"
         "/will [id:persen ...] — Atur surat wasiat\n"
         "/appoint_heir [user_id] — Tunjuk ahli waris tunggal (100%)\n"
         "/will_status — Cek isi wasiat\n"
+        "/cancel_will — Batalkan surat wasiat\n"
         "/retire — Eksekusi wasiat & bagi harta\n\n"
         "🛠️ <b>ADMINISTRATOR:</b> /lineage_admin_panel"
     )
@@ -1424,6 +1727,11 @@ def build_app():
     app.add_error_handler(global_error_handler)
 
     app.add_handler(CommandHandler("start", start))
+
+    # Registration & Utility (NEW)
+    app.add_handler(CommandHandler("register", cmd_register))
+    app.add_handler(CommandHandler("my_id", cmd_my_id))
+    app.add_handler(CommandHandler("tree", cmd_tree))
 
     # Marriage
     app.add_handler(CommandHandler("propose", cmd_propose))
@@ -1448,11 +1756,17 @@ def build_app():
     app.add_handler(CommandHandler("revoke_godparent", cmd_revoke_godparent))
     app.add_handler(CommandHandler("my_godchildren", cmd_my_godchildren))
     app.add_handler(CommandHandler("in_laws", cmd_in_laws))
+    app.add_handler(CommandHandler("deposit_vault", cmd_deposit_vault))
+    app.add_handler(CommandHandler("withdraw_vault", cmd_withdraw_vault))
+    app.add_handler(CommandHandler("set_family_tax", cmd_set_family_tax))
+    app.add_handler(CommandHandler("transfer_head", cmd_transfer_head))
+    app.add_handler(CommandHandler("kick_member", cmd_kick_member))
 
     # Inheritance
     app.add_handler(CommandHandler("will", cmd_will))
     app.add_handler(CommandHandler("appoint_heir", cmd_appoint_heir))
     app.add_handler(CommandHandler("will_status", cmd_will_status))
+    app.add_handler(CommandHandler("cancel_will", cmd_cancel_will))
     app.add_handler(CommandHandler("retire", cmd_retire))
 
     # Admin
