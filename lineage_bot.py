@@ -3,6 +3,7 @@ import time
 import random
 import hashlib
 import asyncio
+import logging
 import aiosqlite
 from datetime import datetime, timezone, timedelta
 from contextlib import asynccontextmanager
@@ -12,6 +13,10 @@ from telegram.ext import (
     CommandHandler,
     ContextTypes
 )
+
+# Set up Logging
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logger = logging.getLogger("lineage_bot")
 
 # ==========================================
 # CONFIGURATION
@@ -280,8 +285,14 @@ async def expire_proposals_loop():
                 )
                 await db.commit()
         except Exception as e:
-            print(f"[lineage_bot] expire_proposals_loop error: {e}")
+            logger.error(f"[lineage_bot] expire_proposals_loop error: {e}")
         await asyncio.sleep(PROPOSAL_EXPIRY_CHECK_INTERVAL)
+
+# Global Error Handler
+async def global_error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    logger.error(f"Exception occurred while handling an update: {context.error}", exc_info=context.error)
+    if isinstance(update, Update) and update.effective_message:
+        await update.effective_message.reply_text("❌ Terjadi kesalahan internal pada Lineage Bot.")
 
 # ==========================================
 # SHARED HELPERS
@@ -648,7 +659,7 @@ async def cmd_disown(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if child_id is None:
         return await update.message.reply_text("❌ Format: `/disown [user_id]`", parse_mode="Markdown")
 
-    reason = " ".join(context.args[1:]).strip() or "Tidak disebutkan"
+    reason = " ".join(context.args[1:]).strip() if len(context.args) > 1 else "Tidak disebutkan"
     async with get_db_connection() as db:
         now_epoch = int(time.time())
         cursor = await db.execute(
@@ -1084,7 +1095,7 @@ async def cmd_lock_family(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args or not context.args[0].isdigit():
         return await update.message.reply_text("❌ Format: `/lock_family [family_id] [alasan]`", parse_mode="Markdown")
     family_id = int(context.args[0])
-    reason = " ".join(context.args[1:]).strip() or "Investigasi Admin"
+    reason = " ".join(context.args[1:]).strip() if len(context.args) > 1 else "Investigasi Admin"
 
     async with get_db_connection() as db:
         if await check_admin_tier(db, user_id) < 2:
@@ -1138,7 +1149,7 @@ async def cmd_excommunicate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     target_id = parse_target_id(context)
     if target_id is None:
         return await update.message.reply_text("❌ Format: `/excommunicate [user_id] [alasan]`", parse_mode="Markdown")
-    reason = " ".join(context.args[1:]).strip() or "Tidak disebutkan"
+    reason = " ".join(context.args[1:]).strip() if len(context.args) > 1 else "Tidak disebutkan"
 
     async with get_db_connection() as db:
         if await check_admin_tier(db, user_id) < 3:
@@ -1274,6 +1285,9 @@ def build_app():
     ATAU digabung dengan operation_bot & vault_bot dalam satu proses lewat
     bot_launcher.py (WAJIB, supaya database fisik selalu sinkron)."""
     app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
+
+    # Pass global error handler to trace hidden exceptions
+    app.add_error_handler(global_error_handler)
 
     app.add_handler(CommandHandler("start", start))
 
