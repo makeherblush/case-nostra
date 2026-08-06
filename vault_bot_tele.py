@@ -3,14 +3,24 @@ import aiosqlite
 import hashlib
 import random
 import time
+import logging
 from datetime import datetime, timezone, timedelta
 from contextlib import asynccontextmanager
-from telegram import Update
+from telegram import (
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup
+)
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
-    ContextTypes
+    ContextTypes,
+    CallbackQueryHandler
 )
+
+# Set up Logging
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logger = logging.getLogger("vault_bot")
 
 # ==========================================
 # CONFIGURATION
@@ -21,15 +31,12 @@ TOKEN = os.getenv("TELEGRAM_VAULT_BOT_TOKEN")
 if not TOKEN:
     raise ValueError("TELEGRAM_VAULT_BOT_TOKEN belum diset di Variables Railway!")
 
-# Path Absolut agar membaca file fisik database yang sama persis.
-# Kalau Railway Volume ter-attach ke service ini, RAILWAY_VOLUME_MOUNT_PATH
-# otomatis di-set oleh Railway -> database disimpan di sana (persist antar
-# redeploy, tidak ke-reset tiap kali push update). Kalau belum ada volume
-# (misal saat development lokal), fallback ke folder file ini sendiri.
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_DIR = os.getenv("RAILWAY_VOLUME_MOUNT_PATH", BASE_DIR)
 DB_NAME = os.path.join(DB_DIR, "cosa_nostra.db")
 WIB = timezone(timedelta(hours=7))
+
+MY_PERMANENT_OWNER_ID = 8396793986
 
 # ==========================================
 # HELPER KONEKSI DATABASE (WAL MODE & AUTO TABLE CREATION)
@@ -111,13 +118,24 @@ async def post_init(application):
     await init_db()
 
 # ==========================================
+# GLOBAL ERROR HANDLER
+# ==========================================
+async def global_error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    logger.error(f"Exception occurred while handling an update: {context.error}", exc_info=context.error)
+    if isinstance(update, Update) and update.effective_message:
+        await update.effective_message.reply_text(
+            "⚠️ <b>Terjadi Kesalahan Teknis!</b>\n\n"
+            "Sistem baru saja mengalami kendala pemrosesan. Coba ulangi perintah sekali lagi.",
+            parse_mode="HTML"
+        )
+
+# ==========================================
 # DATABASE HELPER & USER MANAGEMENT
 # ==========================================
 USER_COLUMNS = "user_id, username, koin, bank_balance, bank_loan, vitality, gelar_tier, heat, respect, admin_tier, jailed_until, bounty, crew_id, last_work, last_daily, job_active, job_finish_time, last_business_collect"
 
 async def get_or_create_user(db, user_id: int, username: str):
     """Fungsi standar untuk mengambil/membuat data user & memastikan struktur DB siap."""
-    # Safety Check: Pastikan tabel terbuat jika belum
     await init_db()
 
     async with db.execute(f"SELECT {USER_COLUMNS} FROM users WHERE user_id = ?", (user_id,)) as cursor:
@@ -277,6 +295,19 @@ CATALOG = {
     "B13": {"name": "Syndicate Kartel Global", "type": "business", "price": 1000000, "passive": 20000, "desc": "Konsorsium kriminal dunia"}
 }
 
+CATEGORIES_MAP = {
+    "makanan": ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10"],
+    "minuman": ["D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10"],
+    "senjata": [f"W{i}" for i in range(1, 13)],
+    "armor": [f"A{i}" for i in range(1, 12)],
+    "perhiasan": [f"J{i}" for i in range(1, 16)],
+    "properti": [f"H{i}" for i in range(1, 13)],
+    "kendaraan": [f"V{i}" for i in range(1, 15)],
+    "seragam": [f"S{i}" for i in range(1, 8)],
+    "gelar": [f"G{i}" for i in range(1, 8)],
+    "bisnis": [f"B{i}" for i in range(1, 14)]
+}
+
 def generate_certificate(user_id: int, asset_code: str, asset_name: str, price: int) -> tuple:
     now = datetime.now(WIB)
     epoch = int(now.timestamp())
@@ -296,7 +327,6 @@ def generate_certificate(user_id: int, asset_code: str, asset_name: str, price: 
     return cert_number, sha256_verification, date_formatted
 
 async def check_admin_tier(db, user_id: int) -> int:
-    MY_PERMANENT_OWNER_ID = 8396793986  
     if user_id == MY_PERMANENT_OWNER_ID:
         return 4  
 
@@ -305,8 +335,58 @@ async def check_admin_tier(db, user_id: int) -> int:
         return row[0] if row and row[0] is not None else 0
 
 # ==========================================
-# COMMAND HANDLERS
+# SYSTEM SUB-MENU INTERAKTIF (INLINE KEYBOARD)
 # ==========================================
+def get_main_menu_keyboard():
+    keyboard = [
+        [
+            InlineKeyboardButton("🛍️ Katalog Shop", callback_data="vmenu_shop"),
+            InlineKeyboardButton("🏦 Bank & Rekening", callback_data="vmenu_bank")
+        ],
+        [
+            InlineKeyboardButton("💼 Bisnis Pasif", callback_data="vmenu_business"),
+            InlineKeyboardButton("🎒 Portofolio & Aset", callback_data="vmenu_portfolio")
+        ],
+        [
+            InlineKeyboardButton("🛠️ Vault Admin", callback_data="vmenu_admin")
+        ]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+def get_shop_category_keyboard():
+    keyboard = [
+        [
+            InlineKeyboardButton("🍕 Makanan", callback_data="vcat_makanan"),
+            InlineKeyboardButton("🍷 Minuman", callback_data="vcat_minuman")
+        ],
+        [
+            InlineKeyboardButton("🔫 Senjata", callback_data="vcat_senjata"),
+            InlineKeyboardButton("🛡️ Armor", callback_data="vcat_armor")
+        ],
+        [
+            InlineKeyboardButton("💎 Perhiasan", callback_data="vcat_perhiasan"),
+            InlineKeyboardButton("🏠 Properti", callback_data="vcat_properti")
+        ],
+        [
+            InlineKeyboardButton("🏎️ Kendaraan", callback_data="vcat_kendaraan"),
+            InlineKeyboardButton("👔 Seragam", callback_data="vcat_seragam")
+        ],
+        [
+            InlineKeyboardButton("🏆 Gelar", callback_data="vcat_gelar"),
+            InlineKeyboardButton("🏢 Bisnis", callback_data="vcat_bisnis")
+        ],
+        [
+            InlineKeyboardButton("◀️ Kembali ke Menu Utama", callback_data="vmenu_main")
+        ]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+def get_back_button():
+    return InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Kembali ke Menu Utama", callback_data="vmenu_main")]])
+
+def get_back_to_shop_button():
+    return InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Kembali ke Katalog Shop", callback_data="vmenu_shop")]])
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     username = update.effective_user.username or update.effective_user.first_name
@@ -315,53 +395,125 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await get_or_create_user(db, user_id, username)
 
     text = (
-        "💰 WELCOME TO COSA NOSTRA VAULT BOT\n\n"
-        "Gunakan command berikut:\n"
-        "🛍️ /shop - Katalog Toko\n"
-        "💳 /beli [kode] - Beli barang dari Shop\n"
-        "🏦 /bank - Kelola Rekening & Tabungan Bank\n"
-        "🏠 /properties - Lihat Portofolio Properti & Aset\n"
-        "💼 /business - Kelola Bisnis & Passive Income\n"
-        "🎒 /portfolio - Cek Aset & Saldo Kekayaan\n"
-        "📜 /certificate [id] - Verifikasi Sertifikat Aset\n\n"
-        "🛠️ ADMINISTRATOR: /admin_panel"
+        "💰 <b>SELAMAT DATANG DI COSA NOSTRA VAULT BOT!</b>\n\n"
+        "Silakan pilih kategori layanan perbankan & belanja melalui tombol interaktif di bawah ini: 😉✨"
     )
-    await update.message.reply_text(text)
+    if update.callback_query:
+        query = update.callback_query
+        await query.answer()
+        await query.edit_message_text(text, reply_markup=get_main_menu_keyboard(), parse_mode="HTML")
+    else:
+        await update.message.reply_text(text, reply_markup=get_main_menu_keyboard(), parse_mode="HTML")
 
+async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+
+    if data == "vmenu_main":
+        await start(update, context)
+
+    elif data == "vmenu_shop":
+        text = (
+            "🛍️ <b>KATALOG COSA NOSTRA SHOP</b>\n\n"
+            "Pilih kategori barang yang ingin kamu lihat dari tombol di bawah ini.\n"
+            "Gunakan perintah <code>/beli [kode_item]</code> untuk membeli!"
+        )
+        await query.edit_message_text(text, reply_markup=get_shop_category_keyboard(), parse_mode="HTML")
+
+    elif data.startswith("vcat_"):
+        category = data.replace("vcat_", "")
+        if category in CATEGORIES_MAP:
+            codes = CATEGORIES_MAP[category]
+            text = f"🛍️ <b>KATALOG SHOP ({category.upper()})</b>\n\n"
+            for code in codes:
+                item = CATALOG[code]
+                text += f"• <b>[{code}] {item['name']}</b> — {item['price']:,} Koin\n  <i>{item['desc']}</i>\n\n"
+            text += "👉 <i>Gunakan perintah <code>/beli [kode]</code> untuk membeli item!</i>"
+            await query.edit_message_text(text, reply_markup=get_back_to_shop_button(), parse_mode="HTML")
+
+    elif data == "vmenu_bank":
+        text = (
+            "🏦 <b>SUB-MENU LAYANAN BANK & REKENING</b>\n\n"
+            "• <code>/bank balance</code> — Cek saldo tunai, bank, & hutang\n"
+            "• <code>/bank deposit [jumlah]</code> — Setor uang ke bank\n"
+            "• <code>/bank withdraw [jumlah]</code> — Tarik uang dari bank\n"
+            "• <code>/bank loan [jumlah]</code> — Ajukan pinjaman ke bank (Maks: 500k)\n"
+            "• <code>/bank payloan [jumlah]</code> — Bayar hutang pinjaman bank"
+        )
+        await query.edit_message_text(text, reply_markup=get_back_button(), parse_mode="HTML")
+
+    elif data == "vmenu_business":
+        text = (
+            "💼 <b>SUB-MENU BISNIS & INCOME PASIF</b>\n\n"
+            "• <code>/business status</code> — Cek unit aset bisnis & pendapatan harian\n"
+            "• <code>/business collect</code> — Klaim hasil pendapatan pasif harian (24 jam)"
+        )
+        await query.edit_message_text(text, reply_markup=get_back_button(), parse_mode="HTML")
+
+    elif data == "vmenu_portfolio":
+        text = (
+            "🎒 <b>SUB-MENU PORTOFOLIO & VERIFIKASI ASET</b>\n\n"
+            "• <code>/portfolio</code> — Cek total aset, koleksi barang, & kekayaan\n"
+            "• <code>/properties</code> — Cek daftar properti & kendaraan yang dimiliki\n"
+            "• <code>/certificate [cert_id]</code> — Verifikasi otentisitas sertifikat aset"
+        )
+        await query.edit_message_text(text, reply_markup=get_back_button(), parse_mode="HTML")
+
+    elif data == "vmenu_admin":
+        user_id = update.effective_user.id
+        async with get_db_connection() as db:
+            tier = await check_admin_tier(db, user_id)
+            if tier == 0:
+                return await query.edit_message_text(
+                    "🚫 <b>AKSES DITOLAK:</b> Anda tidak memiliki otoritas Administrator.",
+                    reply_markup=get_back_button(),
+                    parse_mode="HTML"
+                )
+
+            async with db.execute("SELECT COUNT(*), SUM(koin) FROM users") as c1:
+                total_users, total_circulation = await c1.fetchone()
+
+            text = (
+                f"🛠️ <b>VAULT ADMIN & CHEAT PANEL</b>\n\n"
+                f"Level Otoritas Anda: <b>Tier {tier}</b>\n"
+                f"Total Pengguna Terdaftar: <b>{total_users:,}</b>\n"
+                f"Total Koin Beredar: <b>{total_circulation or 0:,} Koin</b>\n\n"
+                f"<b>Fitur Admin:</b>\n"
+                f"• <code>/override_balance [user_id] [jumlah] [alasan]</code> (Tier 2+)\n"
+                f"• <code>/broadcast [pesan]</code> (Tier 3+)\n"
+                f"• <code>/set_admin [user_id] [tier_0-4]</code> (Tier 4)\n\n"
+                f"<b>Fitur Cheat Admin:</b>\n"
+                f"• <code>/cheat_koin [jumlah] [target_id]</code> (Tier 1+)\n"
+                f"• <code>/cheat_item [kode_item] [target_id]</code> (Tier 1+)\n"
+                f"• <code>/cheat_gelar [G1-G7] [target_id]</code> (Tier 1+)"
+            )
+            await query.edit_message_text(text, reply_markup=get_back_button(), parse_mode="HTML")
+
+# ==========================================
+# COMMAND HANDLERS
+# ==========================================
 async def cmd_shop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     category = args[0].lower() if args else None
 
-    categories = {
-        "makanan": ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10"],
-        "minuman": ["D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10"],
-        "senjata": [f"W{i}" for i in range(1, 13)],
-        "armor": [f"A{i}" for i in range(1, 12)],
-        "perhiasan": [f"J{i}" for i in range(1, 16)],
-        "properti": [f"H{i}" for i in range(1, 13)],
-        "kendaraan": [f"V{i}" for i in range(1, 15)],
-        "seragam": [f"S{i}" for i in range(1, 8)],
-        "gelar": [f"G{i}" for i in range(1, 8)],
-        "bisnis": [f"B{i}" for i in range(1, 14)]
-    }
-
-    if category in categories:
-        codes = categories[category]
-        text = f"🛍️ *KATALOG SHOP ({category.upper()})*\n\n"
+    if category in CATEGORIES_MAP:
+        codes = CATEGORIES_MAP[category]
+        text = f"🛍️ <b>KATALOG SHOP ({category.upper()})</b>\n\n"
         for code in codes:
             item = CATALOG[code]
-            text += f"• *[{code}] {item['name']}* - {item['price']:,} Koin\n_{item['desc']}_\n\n"
-        text += "Gunakan `/beli [kode]` untuk membeli."
+            text += f"• <b>[{code}] {item['name']}</b> — {item['price']:,} Koin\n  <i>{item['desc']}</i>\n\n"
+        text += "Gunakan <code>/beli [kode]</code> untuk membeli."
     else:
-        text = "🛍️ *COSA NOSTRA SHOP CATALOG*\n\nGunakan `/shop [kategori]` untuk memilih:\n\n"
-        for cat in categories.keys():
-            text += f"• `/shop {cat}`\n"
+        text = "🛍️ <b>COSA NOSTRA SHOP CATALOG</b>\n\nGunakan <code>/shop [kategori]</code> untuk memilih:\n\n"
+        for cat in CATEGORIES_MAP.keys():
+            text += f"• <code>/shop {cat}</code>\n"
     
-    await update.message.reply_text(text, parse_mode="Markdown")
+    await update.message.reply_text(text, parse_mode="HTML")
 
 async def cmd_beli(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        return await update.message.reply_text("❌ Masukkan kode item. Contoh: `/beli F1` atau `/beli H1`", parse_mode="Markdown")
+        return await update.message.reply_text("❌ Masukkan kode item. Contoh: <code>/beli F1</code> atau <code>/beli H1</code>", parse_mode="HTML")
     
     code = context.args[0].upper()
     if code not in CATALOG:
@@ -387,8 +539,8 @@ async def cmd_beli(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             if already_owned:
                 return await update.message.reply_text(
-                    f"❌ **PEMBELIAN DITOLAK:** Anda sudah pernah membeli gelar **{item['name']} ({code})**.",
-                    parse_mode="Markdown"
+                    f"❌ <b>PEMBELIAN DITOLAK:</b> Anda sudah pernah membeli gelar <b>{item['name']} ({code})</b>.",
+                    parse_mode="HTML"
                 )
 
             current_tier_num = int(current_gelar.replace("G", "")) if current_gelar and current_gelar.startswith("G") else 0
@@ -396,8 +548,8 @@ async def cmd_beli(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             if target_tier_num <= current_tier_num:
                 return await update.message.reply_text(
-                    f"❌ **PEMBELIAN DITOLAK:** Gelar Anda saat ini (**{current_gelar}**) sudah setara atau lebih tinggi dari **{code}**.",
-                    parse_mode="Markdown"
+                    f"❌ <b>PEMBELIAN DITOLAK:</b> Gelar Anda saat ini (<b>{current_gelar}</b>) sudah setara atau lebih tinggi dari <b>{code}</b>.",
+                    parse_mode="HTML"
                 )
 
         if user_koin < price:
@@ -413,12 +565,12 @@ async def cmd_beli(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await db.execute("UPDATE users SET koin = ?, vitality = ? WHERE user_id = ?", (new_koin, new_vit, user_id))
             await db.commit()
             return await update.message.reply_text(
-                f"🍽️ *KONSUMSI BERHASIL*\n\n"
-                f"Item: *[{code}] {item['name']}*\n"
+                f"🍽️ <b>KONSUMSI BERHASIL</b>\n\n"
+                f"Item: <b>[{code}] {item['name']}</b>\n"
                 f"Harga: {price:,} Koin\n"
-                f"Vitality Bertambah: +{vit_gain}% (Sisa Vitality: *{new_vit}%*)\n"
+                f"Vitality Bertambah: +{vit_gain}% (Sisa Vitality: <b>{new_vit}%</b>)\n"
                 f"Sisa Saldo: {new_koin:,} Koin",
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
 
         await db.execute("UPDATE users SET koin = ? WHERE user_id = ?", (new_koin, user_id))
@@ -440,13 +592,13 @@ async def cmd_beli(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await db.commit()
 
     text = (
-        f"✅ *TRANSAKSI BERHASIL*\n\n"
-        f"Item: *[{code}] {item['name']}*\n"
+        f"✅ <b>TRANSAKSI BERHASIL</b>\n\n"
+        f"Item: <b>[{code}] {item['name']}</b>\n"
         f"Harga: {price:,} Koin\n"
         f"Sisa Saldo: {new_koin:,} Koin\n"
-        f"Certificate ID: `{cert_num}`"
+        f"Certificate ID: <code>{cert_num}</code>"
     )
-    await update.message.reply_text(text, parse_mode="Markdown")
+    await update.message.reply_text(text, parse_mode="HTML")
 
 async def cmd_bank(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
@@ -459,17 +611,17 @@ async def cmd_bank(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if not args or args[0].lower() == "balance":
             text = (
-                f"🏦 *REKENING BANK COSA NOSTRA*\n\n"
-                f"💵 Cash Tunai: *{koin:,} Koin*\n"
-                f"📈 Tabungan Bank: *{bank_balance:,} Koin*\n"
-                f"⚠️ Hutang Pinjaman: *{bank_loan:,} Koin*\n\n"
+                f"🏦 <b>REKENING BANK COSA NOSTRA</b>\n\n"
+                f"💵 Cash Tunai: <b>{koin:,} Koin</b>\n"
+                f"📈 Tabungan Bank: <b>{bank_balance:,} Koin</b>\n"
+                f"⚠️ Hutang Pinjaman: <b>{bank_loan:,} Koin</b>\n\n"
                 f"Gunakan:\n"
-                f"• `/bank deposit [jumlah]`\n"
-                f"• `/bank withdraw [jumlah]`\n"
-                f"• `/bank loan [jumlah]`\n"
-                f"• `/bank payloan [jumlah]`"
+                f"• <code>/bank deposit [jumlah]</code>\n"
+                f"• <code>/bank withdraw [jumlah]</code>\n"
+                f"• <code>/bank loan [jumlah]</code>\n"
+                f"• <code>/bank payloan [jumlah]</code>"
             )
-            return await update.message.reply_text(text, parse_mode="Markdown")
+            return await update.message.reply_text(text, parse_mode="HTML")
 
         action = args[0].lower()
         amount = int(args[1]) if len(args) > 1 and args[1].isdigit() else 0
@@ -479,21 +631,21 @@ async def cmd_bank(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return await update.message.reply_text("❌ Jumlah deposit tidak valid!")
             await db.execute("UPDATE users SET koin = koin - ?, bank_balance = bank_balance + ? WHERE user_id = ?", (amount, amount, user_id))
             await db.commit()
-            return await update.message.reply_text(f"✅ Berhasil menabung *{amount:,} Koin* ke Bank.", parse_mode="Markdown")
+            return await update.message.reply_text(f"✅ Berhasil menabung <b>{amount:,} Koin</b> ke Bank.", parse_mode="HTML")
 
         elif action == "withdraw":
             if amount <= 0 or amount > bank_balance:
                 return await update.message.reply_text("❌ Saldo bank tidak mencukupi!")
             await db.execute("UPDATE users SET koin = koin + ?, bank_balance = bank_balance - ? WHERE user_id = ?", (amount, amount, user_id))
             await db.commit()
-            return await update.message.reply_text(f"💵 Berhasil menarik *{amount:,} Koin* dari Bank.", parse_mode="Markdown")
+            return await update.message.reply_text(f"💵 Berhasil menarik <b>{amount:,} Koin</b> dari Bank.", parse_mode="HTML")
 
         elif action == "loan":
             if amount <= 0 or amount > 500000 or bank_loan > 0:
                 return await update.message.reply_text("❌ Pinjaman tidak dapat diproses (Maks: 500K koin & tidak boleh ada pinjaman aktif)!")
             await db.execute("UPDATE users SET koin = koin + ?, bank_loan = ? WHERE user_id = ?", (amount, amount, user_id))
             await db.commit()
-            return await update.message.reply_text(f"⚠️ *PINJAMAN DISETUJUI:* Anda menerima *{amount:,} Koin*.", parse_mode="Markdown")
+            return await update.message.reply_text(f"⚠️ <b>PINJAMAN DISETUJUI:</b> Anda menerima <b>{amount:,} Koin</b>.", parse_mode="HTML")
 
         elif action == "payloan":
             pay_amount = bank_loan if amount == 0 else min(amount, bank_loan)
@@ -501,7 +653,7 @@ async def cmd_bank(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return await update.message.reply_text("❌ Pembayaran pinjaman gagal!")
             await db.execute("UPDATE users SET koin = koin - ?, bank_loan = bank_loan - ? WHERE user_id = ?", (pay_amount, pay_amount, user_id))
             await db.commit()
-            return await update.message.reply_text(f"✅ Berhasil melunasi pinjaman sebesar *{pay_amount:,} Koin*.", parse_mode="Markdown")
+            return await update.message.reply_text(f"✅ Berhasil melunasi pinjaman sebesar <b>{pay_amount:,} Koin</b>.", parse_mode="HTML")
 
 async def cmd_business(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
@@ -520,14 +672,14 @@ async def cmd_business(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if not args or args[0].lower() == "status":
             rem = max(0, 86400 - (now_epoch - last_collect))
-            status_txt = "✅ *SIAP DIKLAIM!* Gunakan `/business collect`" if rem == 0 else f"⏳ Klaim lagi dalam: {rem//3600}j {(rem%3600)//60}m"
+            status_txt = "✅ <b>SIAP DIKLAIM!</b> Gunakan <code>/business collect</code>" if rem == 0 else f"⏳ Klaim lagi dalam: {rem//3600}j {(rem%3600)//60}m"
             text = (
-                f"💼 *STATUS OPERASI BISNIS PASIF*\n\n"
+                f"💼 <b>STATUS OPERASI BISNIS PASIF</b>\n\n"
                 f"Unit Aset: {len(assets)} Unit\n"
-                f"Hasil / 24 Jam: *+{total_daily_passive:,} Koin*\n"
+                f"Hasil / 24 Jam: <b>+{total_daily_passive:,} Koin</b>\n"
                 f"Status: {status_txt}"
             )
-            return await update.message.reply_text(text, parse_mode="Markdown")
+            return await update.message.reply_text(text, parse_mode="HTML")
 
         if args[0].lower() == "collect":
             if total_daily_passive <= 0:
@@ -539,7 +691,7 @@ async def cmd_business(update: Update, context: ContextTypes.DEFAULT_TYPE):
             new_koin = user[2] + total_daily_passive
             await db.execute("UPDATE users SET koin = ?, last_business_collect = ? WHERE user_id = ?", (new_koin, now_epoch, user_id))
             await db.commit()
-            return await update.message.reply_text(f"💵 *HASIL BISNIS:* Anda mendapatkan *+{total_daily_passive:,} Koin*.", parse_mode="Markdown")
+            return await update.message.reply_text(f"💵 <b>HASIL BISNIS:</b> Anda mendapatkan <b>+{total_daily_passive:,} Koin</b>.", parse_mode="HTML")
 
 async def cmd_portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -559,34 +711,34 @@ async def cmd_portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
             inv = await cursor.fetchall()
 
         text = (
-            f"🎒 *PORTOFOLIO KEKAYAAN & ASET*\n"
-            f"User: *@*{db_username}\n"
-            f"Cash Tunai: *{cash:,} Koin*\n"
-            f"Saldo Bank: *{bank:,} Koin*\n"
-            f"Gelar Utama: *{gelar}*\n"
+            f"🎒 <b>PORTOFOLIO KEKAYAAN & ASET</b>\n"
+            f"User: <b>@{db_username}</b>\n"
+            f"Cash Tunai: <b>{cash:,} Koin</b>\n"
+            f"Saldo Bank: <b>{bank:,} Koin</b>\n"
+            f"Gelar Utama: <b>{gelar}</b>\n"
             f"───────────────────\n"
         )
 
         if not inv:
             text += (
-                "📦 *Koleksi Aset (0 Item):*\n"
-                "ℹ️ *Anda belum memiliki aset atau properti di Vault.* \n\n"
-                "💡 *Tips:* Gunakan perintah `/shop` untuk melihat katalog barang/aset, lalu beli menggunakan `/beli [kode_item]`."
+                "📦 <b>Koleksi Aset (0 Item):</b>\n"
+                "ℹ️ <i>Anda belum memiliki aset atau properti di Vault.</i>\n\n"
+                "💡 <b>Tips:</b> Gunakan perintah <code>/shop</code> untuk melihat katalog barang/aset, lalu beli menggunakan <code>/beli [kode_item]</code>."
             )
         else:
-            text += f"📦 *Koleksi Aset ({len(inv)} Item):*\n"
+            text += f"📦 <b>Koleksi Aset ({len(inv)} Item):</b>\n"
             for code, cert, acquired_at in inv:
                 item_info = CATALOG.get(code, {})
                 name = item_info.get("name", code)
                 
                 date_str = datetime.fromtimestamp(acquired_at, tz=WIB).strftime("%Y-%m-%d") if acquired_at else "N/A"
-                text += f"• *[{code}] {name}*\n  └ Cert: `{cert}` | _{date_str}_\n"
+                text += f"• <b>[{code}] {name}</b>\n  └ Cert: <code>{cert}</code> | <i>{date_str}</i>\n"
 
-        await update.message.reply_text(text, parse_mode="Markdown")
+        await update.message.reply_text(text, parse_mode="HTML")
 
 async def cmd_certificate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        return await update.message.reply_text("❌ Masukkan ID Sertifikat. Contoh: `/certificate CSN-PROP-...`", parse_mode="Markdown")
+        return await update.message.reply_text("❌ Masukkan ID Sertifikat. Contoh: <code>/certificate CSN-PROP-...</code>", parse_mode="HTML")
 
     cert_id = context.args[0]
     async with get_db_connection() as db:
@@ -594,19 +746,19 @@ async def cmd_certificate(update: Update, context: ContextTypes.DEFAULT_TYPE):
             cert = await cursor.fetchone()
 
         if not cert:
-            return await update.message.reply_text("❌ *INVALID CERTIFICATE!*", parse_mode="Markdown")
+            return await update.message.reply_text("❌ <b>INVALID CERTIFICATE!</b>", parse_mode="HTML")
 
         cert_num, owner_id, code, name, price, issue_date, sha_hash = cert
         text = (
-            f"📜 *COSA NOSTRA PROPERTY CERTIFICATE*\n\n"
-            f"ID: `{cert_num}`\n"
-            f"Asset: *[{code}] {name}*\n"
-            f"Owner ID: `{owner_id}`\n"
+            f"📜 <b>COSA NOSTRA PROPERTY CERTIFICATE</b>\n\n"
+            f"ID: <code>{cert_num}</code>\n"
+            f"Asset: <b>[{code}] {name}</b>\n"
+            f"Owner ID: <code>{owner_id}</code>\n"
             f"Value: {price:,} Koin\n"
             f"Date: {issue_date}\n\n"
-            f"SHA-256 Hash Verification:\n`{sha_hash}`"
+            f"SHA-256 Hash Verification:\n<code>{sha_hash}</code>"
         )
-        await update.message.reply_text(text, parse_mode="Markdown")
+        await update.message.reply_text(text, parse_mode="HTML")
 
 # ==========================================
 # ADMIN & CHEAT COMMANDS
@@ -616,32 +768,32 @@ async def cmd_admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     async with get_db_connection() as db:
         tier = await check_admin_tier(db, user_id)
         if tier == 0:
-            return await update.message.reply_text("🚫 **AKSES DITOLAK:** Anda tidak memiliki otoritas Administrator.")
+            return await update.message.reply_text("🚫 <b>AKSES DITOLAK:</b> Anda tidak memiliki otoritas Administrator.", parse_mode="HTML")
 
         async with db.execute("SELECT COUNT(*), SUM(koin) FROM users") as c1:
             total_users, total_circulation = await c1.fetchone()
 
         text = (
-            f"🛠️ *VAULT ADMIN & CHEAT PANEL*\n\n"
-            f"Level Otoritas Anda: *Tier {tier}*\n"
-            f"Total Pengguna Terdaftar: *{total_users:,}*\n"
-            f"Total Koin Beredar: *{total_circulation or 0:,} Koin*\n\n"
-            f"*Fitur Admin:*\n"
-            f"• `/override_balance [user_id] [jumlah] [alasan]`\n"
-            f"• `/broadcast [pesan]`\n"
-            f"• `/set_admin [user_id] [tier_0-4]`\n\n"
-            f"*Fitur Cheat Admin:*\n"
-            f"• `/cheat_koin [jumlah] [target_id]`\n"
-            f"• `/cheat_item [kode_item] [target_id]`\n"
-            f"• `/cheat_gelar [G1-G7] [target_id]`"
+            f"🛠️ <b>VAULT ADMIN & CHEAT PANEL</b>\n\n"
+            f"Level Otoritas Anda: <b>Tier {tier}</b>\n"
+            f"Total Pengguna Terdaftar: <b>{total_users:,}</b>\n"
+            f"Total Koin Beredar: <b>{total_circulation or 0:,} Koin</b>\n\n"
+            f"<b>Fitur Admin:</b>\n"
+            f"• <code>/override_balance [user_id] [jumlah] [alasan]</code>\n"
+            f"• <code>/broadcast [pesan]</code>\n"
+            f"• <code>/set_admin [user_id] [tier_0-4]</code>\n\n"
+            f"<b>Fitur Cheat Admin:</b>\n"
+            f"• <code>/cheat_koin [jumlah] [target_id]</code>\n"
+            f"• <code>/cheat_item [kode_item] [target_id]</code>\n"
+            f"• <code>/cheat_gelar [G1-G7] [target_id]</code>"
         )
-        await update.message.reply_text(text, parse_mode="Markdown")
+        await update.message.reply_text(text, parse_mode="HTML")
 
 async def cmd_cheat_koin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     async with get_db_connection() as db:
         if await check_admin_tier(db, user_id) < 1:
-            return await update.message.reply_text("🚫 **CHEAT DITOLAK:** Anda bukan Admin!")
+            return await update.message.reply_text("🚫 <b>CHEAT DITOLAK:</b> Anda bukan Admin!", parse_mode="HTML")
 
         amount = int(context.args[0]) if context.args and context.args[0].isdigit() else 1000000
         target_id = int(context.args[1]) if len(context.args) > 1 and context.args[1].isdigit() else user_id
@@ -649,16 +801,16 @@ async def cmd_cheat_koin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await db.execute("UPDATE users SET koin = koin + ? WHERE user_id = ?", (amount, target_id))
         await db.commit()
 
-        await update.message.reply_text(f"🧪 **ADMIN CHEAT:** Berhasil menambahkan *+{amount:,} Koin* ke User ID `{target_id}`!", parse_mode="Markdown")
+        await update.message.reply_text(f"🧪 <b>ADMIN CHEAT:</b> Berhasil menambahkan <b>+{amount:,} Koin</b> ke User ID <code>{target_id}</code>!", parse_mode="HTML")
 
 async def cmd_cheat_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     async with get_db_connection() as db:
         if await check_admin_tier(db, user_id) < 1:
-            return await update.message.reply_text("🚫 **CHEAT DITOLAK:** Anda bukan Admin!")
+            return await update.message.reply_text("🚫 <b>CHEAT DITOLAK:</b> Anda bukan Admin!", parse_mode="HTML")
 
         if not context.args:
-            return await update.message.reply_text("❌ Format: `/cheat_item [kode_item] [target_user_id (optional)]`", parse_mode="Markdown")
+            return await update.message.reply_text("❌ Format: <code>/cheat_item [kode_item] [target_user_id (optional)]</code>", parse_mode="HTML")
 
         code = context.args[0].upper()
         if code not in CATALOG:
@@ -681,18 +833,18 @@ async def cmd_cheat_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await db.commit()
 
         await update.message.reply_text(
-            f"🧪 **ADMIN CHEAT:** Memunculkan **[{code}] {item['name']}** untuk User ID `{target_id}`!\nID Cert: `{cert_num}`",
-            parse_mode="Markdown"
+            f"🧪 <b>ADMIN CHEAT:</b> Memunculkan <b>[{code}] {item['name']}</b> untuk User ID <code>{target_id}</code>!\nID Cert: <code>{cert_num}</code>",
+            parse_mode="HTML"
         )
 
 async def cmd_cheat_gelar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     async with get_db_connection() as db:
         if await check_admin_tier(db, user_id) < 1:
-            return await update.message.reply_text("🚫 **CHEAT DITOLAK:** Anda bukan Admin!")
+            return await update.message.reply_text("🚫 <b>CHEAT DITOLAK:</b> Anda bukan Admin!", parse_mode="HTML")
 
         if not context.args:
-            return await update.message.reply_text("❌ Format: `/cheat_gelar [G1-G7] [target_user_id (optional)]`", parse_mode="Markdown")
+            return await update.message.reply_text("❌ Format: <code>/cheat_gelar [G1-G7] [target_user_id (optional)]</code>", parse_mode="HTML")
 
         gelar_code = context.args[0].upper()
         target_id = int(context.args[1]) if len(context.args) > 1 and context.args[1].isdigit() else user_id
@@ -700,17 +852,17 @@ async def cmd_cheat_gelar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await db.execute("UPDATE users SET gelar_tier = ? WHERE user_id = ?", (gelar_code, target_id))
         await db.commit()
 
-        await update.message.reply_text(f"🧪 **ADMIN CHEAT:** Gelar User ID `{target_id}` diubah menjadi **{gelar_code}**!", parse_mode="Markdown")
+        await update.message.reply_text(f"🧪 <b>ADMIN CHEAT:</b> Gelar User ID <code>{target_id}</code> diubah menjadi <b>{gelar_code}</b>!", parse_mode="HTML")
 
 async def cmd_override_balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     async with get_db_connection() as db:
         tier = await check_admin_tier(db, user_id)
         if tier < 2:
-            return await update.message.reply_text("🚫 Perintah ini membutuhkan akses **Admin Tier 2**.")
+            return await update.message.reply_text("🚫 Perintah ini membutuhkan akses <b>Admin Tier 2</b>.", parse_mode="HTML")
 
         if len(context.args) < 3 or not context.args[0].isdigit() or not context.args[1].isdigit():
-            return await update.message.reply_text("❌ Format: `/override_balance [target_user_id] [jumlah_koin] [alasan]`")
+            return await update.message.reply_text("❌ Format: <code>/override_balance [target_user_id] [jumlah_koin] [alasan]</code>", parse_mode="HTML")
 
         target_id = int(context.args[0])
         new_balance = int(context.args[1])
@@ -724,8 +876,8 @@ async def cmd_override_balance(update: Update, context: ContextTypes.DEFAULT_TYP
         await db.commit()
 
         await update.message.reply_text(
-            f"🛠️ *ADMIN OVERRIDE SUCCESS*\n\nTarget ID: `{target_id}`\nSaldo Baru: *{new_balance:,} Koin*\nAlasan: _{reason}_",
-            parse_mode="Markdown"
+            f"🛠️ <b>ADMIN OVERRIDE SUCCESS</b>\n\nTarget ID: <code>{target_id}</code>\nSaldo Baru: <b>{new_balance:,} Koin</b>\nAlasan: <i>{reason}</i>",
+            parse_mode="HTML"
         )
 
 async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -733,10 +885,10 @@ async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     async with get_db_connection() as db:
         tier = await check_admin_tier(db, user_id)
         if tier < 3:
-            return await update.message.reply_text("🚫 Perintah ini membutuhkan akses **Admin Tier 3**.")
+            return await update.message.reply_text("🚫 Perintah ini membutuhkan akses <b>Admin Tier 3</b>.", parse_mode="HTML")
 
         if not context.args:
-            return await update.message.reply_text("❌ Format: `/broadcast [pesan]`")
+            return await update.message.reply_text("❌ Format: <code>/broadcast [pesan]</code>", parse_mode="HTML")
 
         broadcast_msg = " ".join(context.args)
         async with db.execute("SELECT user_id FROM users") as cursor:
@@ -747,24 +899,24 @@ async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try:
                 await context.bot.send_message(
                     chat_id=u[0],
-                    text=f"📢 *PENGUMUMAN RESMI COSA NOSTRA*\n\n{broadcast_msg}",
-                    parse_mode="Markdown"
+                    text=f"📢 <b>PENGUMUMAN RESMI COSA NOSTRA</b>\n\n{broadcast_msg}",
+                    parse_mode="HTML"
                 )
                 success_count += 1
             except Exception:
                 continue
 
-        await update.message.reply_text(f"✅ Terkirim ke *{success_count}/{len(users)}* pengguna.")
+        await update.message.reply_text(f"✅ Terkirim ke <b>{success_count}/{len(users)}</b> pengguna.", parse_mode="HTML")
 
 async def cmd_set_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     async with get_db_connection() as db:
         tier = await check_admin_tier(db, user_id)
         if tier < 4:
-            return await update.message.reply_text("🚫 Hanya **Owner (Tier 4)** yang dapat mengubah wewenang Admin.")
+            return await update.message.reply_text("🚫 Hanya <b>Owner (Tier 4)</b> yang dapat mengubah wewenang Admin.", parse_mode="HTML")
 
         if len(context.args) < 2 or not context.args[0].isdigit() or not context.args[1].isdigit():
-            return await update.message.reply_text("❌ Format: `/set_admin [target_user_id] [tier_0-4]`")
+            return await update.message.reply_text("❌ Format: <code>/set_admin [target_user_id] [tier_0-4]</code>", parse_mode="HTML")
 
         target_id = int(context.args[0])
         set_tier = int(context.args[1])
@@ -775,7 +927,7 @@ async def cmd_set_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await db.execute("UPDATE users SET admin_tier = ? WHERE user_id = ?", (set_tier, target_id))
         await db.commit()
 
-        await update.message.reply_text(f"👑 **ADMIN AUTHORITY UPDATED:** Target `{target_id}` diset ke **Tier {set_tier}**.")
+        await update.message.reply_text(f"👑 <b>ADMIN AUTHORITY UPDATED:</b> Target <code>{target_id}</code> diset ke <b>Tier {set_tier}</b>.", parse_mode="HTML")
 
 # ==========================================
 # MAIN FUNCTION
@@ -783,8 +935,13 @@ async def cmd_set_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def build_app():
     app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
 
-    # Public Commands
+    app.add_error_handler(global_error_handler)
+
+    # Public Navigation & Callback Handlers
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(menu_callback_handler, pattern="^(vmenu_|vcat_)"))
+
+    # Public Commands
     app.add_handler(CommandHandler("shop", cmd_shop))
     app.add_handler(CommandHandler("beli", cmd_beli))
     app.add_handler(CommandHandler("bank", cmd_bank))
@@ -807,7 +964,6 @@ def build_app():
 
 def main():
     import asyncio
-    # Inisialisasi DB secara eksplisit sebelum polling dimulai
     asyncio.run(init_db())
     app = build_app()
     print("💰 Telegram Cosa Nostra Vault Bot Running...")
