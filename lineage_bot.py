@@ -184,9 +184,7 @@ async def init_lineage_db():
         await db.execute("CREATE INDEX IF NOT EXISTS idx_pcr_parent ON parent_child_relations(parent_id)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_pcr_child ON parent_child_relations(child_id)")
 
-        # Silsilah saudara kandung/angkat - dicatat manual (bukan auto-derive
-        # dari parent_child_relations) karena bisa saja saudara tiri/saudara
-        # angkat yang tidak berbagi parent_id yang sama di sistem ini.
+        # Silsilah saudara kandung/angkat
         await db.execute("""
             CREATE TABLE IF NOT EXISTS sibling_relations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -201,8 +199,7 @@ async def init_lineage_db():
         await db.execute("CREATE INDEX IF NOT EXISTS idx_sibling_a ON sibling_relations(user_a_id)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_sibling_b ON sibling_relations(user_b_id)")
 
-        # Godparent - relasi terpisah dari parent_child_relations (godparent
-        # BUKAN ahli waris otomatis & tidak masuk hitungan is_ancestor()).
+        # Godparent
         await db.execute("""
             CREATE TABLE IF NOT EXISTS godparent_relations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -249,8 +246,6 @@ async def init_lineage_db():
             )
         """)
 
-        # Aksi admin berat (excommunicate, force_family_reset) butuh 2 admin
-        # berbeda: admin pertama request, admin KEDUA approve baru eksekusi.
         await db.execute("""
             CREATE TABLE IF NOT EXISTS lineage_admin_actions (
                 action_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -269,9 +264,6 @@ async def init_lineage_db():
 
 async def post_init(application):
     await init_lineage_db()
-    # Background loop: expire proposal yang sudah lewat waktu (pengganti
-    # BullMQ/Celery job queue - cukup polling ringan tiap 60 detik karena
-    # semua bot jalan dalam 1 proses yang sama).
     application.create_task(expire_proposals_loop())
 
 async def expire_proposals_loop():
@@ -356,20 +348,20 @@ async def get_active_family_membership(db, user_id: int):
 
 async def is_ancestor(db, potential_ancestor_id: int, of_user_id: int, max_depth: int = 20) -> bool:
     """Cek apakah potential_ancestor_id adalah leluhur (parent/grandparent/dst)
-    dari of_user_id, dengan BFS ke atas via parent_child_relations. Dipakai
-    untuk mencegah relasi sirkular (nikah dgn anak sendiri, angkat leluhur
-    sendiri jadi anak, dsb)."""
+    dari of_user_id, dengan BFS ke atas via parent_child_relations."""
     visited = set()
     frontier = [of_user_id]
     depth = 0
     while frontier and depth < max_depth:
-        next_frontier = []
+        placeholders = ",".join("?" for _ in frontier)
         async with db.execute(
             f"""SELECT parent_id, child_id FROM parent_child_relations
-                WHERE is_active = 1 AND child_id IN ({",".join("?" * len(frontier))})""",
+                WHERE is_active = 1 AND child_id IN ({placeholders})""",
             frontier
         ) as cursor:
             rows = await cursor.fetchall()
+        
+        next_frontier = []
         for parent_id, child_id in rows:
             if parent_id == potential_ancestor_id:
                 return True
@@ -400,11 +392,9 @@ async def cmd_propose(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if await get_active_marriage(db, target_id):
             return await update.message.reply_text("❌ Target sudah menikah dengan orang lain.")
 
-        # Cegah lamaran ke ortu/anak sendiri
         if await is_ancestor(db, target_id, user_id) or await is_ancestor(db, user_id, target_id):
             return await update.message.reply_text("🚫 Tidak bisa melamar anggota keluarga kandung/leluhur sendiri.")
 
-        # Rate limit: max N lamaran unik per hari
         since_epoch = int(time.time()) - 86400
         async with db.execute(
             "SELECT COUNT(*) FROM marriage_proposals WHERE proposer_id = ? AND created_at > ?",
@@ -414,7 +404,6 @@ async def cmd_propose(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if count_today >= MAX_PROPOSALS_PER_DAY:
             return await update.message.reply_text(f"🚫 Anda sudah mengirim {MAX_PROPOSALS_PER_DAY} lamaran hari ini. Coba lagi besok.")
 
-        # Cegah proposal duplikat yang masih pending ke target yang sama
         async with db.execute(
             "SELECT 1 FROM marriage_proposals WHERE proposer_id = ? AND target_id = ? AND status = 'pending'",
             (user_id, target_id)
@@ -563,23 +552,20 @@ async def cmd_create_family(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         try:
             now_epoch = int(time.time())
-            await db.execute(
+            cursor = await db.execute(
                 "INSERT INTO families (family_name, head_user_id, created_at) VALUES (?, ?, ?)",
                 (family_name, user_id, now_epoch)
+            )
+            family_id = cursor.lastrowid
+            
+            await db.execute(
+                """INSERT INTO family_members (family_id, user_id, relation_type, loyalty_score, is_active, joined_at)
+                   VALUES (?, ?, 'head', 100, 1, ?)""",
+                (family_id, user_id, now_epoch)
             )
             await db.commit()
         except aiosqlite.IntegrityError:
             return await update.message.reply_text("❌ Nama keluarga sudah dipakai, pilih nama lain.")
-
-        async with db.execute("SELECT family_id FROM families WHERE family_name = ?", (family_name,)) as cursor:
-            family_id = (await cursor.fetchone())[0]
-
-        await db.execute(
-            """INSERT INTO family_members (family_id, user_id, relation_type, loyalty_score, is_active, joined_at)
-               VALUES (?, ?, 'head', 100, 1, ?)""",
-            (family_id, user_id, now_epoch)
-        )
-        await db.commit()
 
         await update.message.reply_text(f"🏛️ **KELUARGA \"{family_name}\" DIDIRIKAN!**\n\nAnda menjadi kepala keluarga (`head`).", parse_mode="Markdown")
 
@@ -625,7 +611,6 @@ async def _add_child(update: Update, context: ContextTypes.DEFAULT_TYPE, relatio
         if not await user_exists(db, child_id):
             return await update.message.reply_text("❌ Target tidak ditemukan di database Cosa Nostra.")
 
-        # Cegah circular parentage: target tidak boleh sudah jadi leluhur kita
         if await is_ancestor(db, child_id, user_id):
             return await update.message.reply_text("🚫 Tidak bisa: target adalah leluhur Anda (akan membuat relasi sirkular).")
 
@@ -746,7 +731,6 @@ async def cmd_family_history(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 async def cmd_add_sibling(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Format: /add_sibling [user_id] [biological|adopted] (default: biological)"""
     user_id = update.effective_user.id
     sibling_id = parse_target_id(context)
     if sibling_id is None:
@@ -762,7 +746,6 @@ async def cmd_add_sibling(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await user_exists(db, sibling_id):
             return await update.message.reply_text("❌ Target tidak ditemukan di database Cosa Nostra.")
 
-        # Cegah menikahi/menyaudarakan leluhur/keturunan sendiri sebagai "saudara"
         if await is_ancestor(db, sibling_id, user_id) or await is_ancestor(db, user_id, sibling_id):
             return await update.message.reply_text("🚫 Tidak bisa: target adalah orang tua/anak Anda, bukan saudara.")
 
@@ -807,7 +790,6 @@ async def cmd_siblings(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 async def cmd_godparent(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Format: /godparent [user_id]  -> user_id ditunjuk sebagai godparent dari pemanggil command"""
     user_id = update.effective_user.id
     godparent_id = parse_target_id(context)
     if godparent_id is None:
@@ -874,7 +856,6 @@ async def cmd_my_godchildren(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 async def cmd_in_laws(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Menampilkan besan/mertua/ipar: keluarga dari pasangan aktif."""
     user_id = update.effective_user.id
     async with get_db_connection() as db:
         marriage = await get_active_marriage(db, user_id)
@@ -918,7 +899,6 @@ async def cmd_in_laws(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # INHERITANCE / WILL COMMANDS
 # ==========================================
 async def cmd_will(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Format: /will 111:50 222:50  -> user_id:persen, total wajib <= 100"""
     user_id = update.effective_user.id
     if not context.args:
         return await update.message.reply_text(
@@ -964,12 +944,11 @@ async def cmd_will(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await db.execute("DELETE FROM will_beneficiaries WHERE will_id = ?", (will_id,))
             await db.execute("UPDATE wills SET status = 'active', updated_at = ? WHERE will_id = ?", (now_epoch, will_id))
         else:
-            await db.execute(
+            cursor = await db.execute(
                 "INSERT INTO wills (owner_id, status, created_at, updated_at) VALUES (?, 'active', ?, ?)",
                 (user_id, now_epoch, now_epoch)
             )
-            async with db.execute("SELECT will_id FROM wills WHERE owner_id = ?", (user_id,)) as cursor:
-                will_id = (await cursor.fetchone())[0]
+            will_id = cursor.lastrowid
 
         for b_id, pct in beneficiaries:
             await db.execute(
@@ -985,7 +964,6 @@ async def cmd_will(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 async def cmd_appoint_heir(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Shortcut: 1 ahli waris tunggal, 100%."""
     user_id = update.effective_user.id
     heir_id = parse_target_id(context)
     if heir_id is None:
@@ -1017,8 +995,6 @@ async def cmd_will_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 async def cmd_retire(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Eksekusi wasiat: cash (koin) dibagi sesuai persentase ke ahli waris,
-    lalu will ditandai 'executed'. Hanya bisa dieksekusi SEKALI per will."""
     user_id = update.effective_user.id
     async with get_db_connection() as db:
         async with db.execute("SELECT will_id, status FROM wills WHERE owner_id = ?", (user_id,)) as cursor:
@@ -1156,14 +1132,13 @@ async def cmd_excommunicate(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return await update.message.reply_text("🚫 Butuh akses Admin Tier 3+.")
 
         now_epoch = int(time.time())
-        await db.execute(
+        cursor = await db.execute(
             """INSERT INTO lineage_admin_actions (action_type, target_id, note, requested_by, status, created_at)
                VALUES ('excommunicate', ?, ?, ?, 'pending', ?)""",
             (target_id, reason, user_id, now_epoch)
         )
+        action_id = cursor.lastrowid
         await db.commit()
-        async with db.execute("SELECT last_insert_rowid()") as cursor:
-            action_id = (await cursor.fetchone())[0]
 
         await update.message.reply_text(
             f"📋 **REQUEST EXCOMMUNICATE DIBUAT** (ID: `{action_id}`)\n\n"
@@ -1200,7 +1175,6 @@ async def cmd_approve_action(update: Update, context: ContextTypes.DEFAULT_TYPE)
         now_epoch = int(time.time())
 
         if action_type == "excommunicate":
-            # Eksekusi: keluar dari keluarga aktif (jika ada) dengan status excommunicated
             await db.execute(
                 "UPDATE family_members SET is_active = 0, left_at = ?, left_reason = 'excommunicated' WHERE user_id = ? AND is_active = 1",
                 (now_epoch, target_id)
@@ -1280,10 +1254,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # MAIN FUNCTION
 # ==========================================
 def build_app():
-    """Membangun Application (handlers terpasang) tanpa langsung menjalankan polling.
-    Dipisah dari main() supaya bot ini bisa dijalankan sendiri (standalone)
-    ATAU digabung dengan operation_bot & vault_bot dalam satu proses lewat
-    bot_launcher.py (WAJIB, supaya database fisik selalu sinkron)."""
     app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
 
     # Pass global error handler to trace hidden exceptions
