@@ -1,27 +1,39 @@
 """
 bot_launcher.py
 ================
-Menjalankan Operation Bot dan Vault Bot dalam SATU proses Python (satu event loop asyncio).
+Menjalankan semua bot Telegram (Operations, Vault, dan bot tambahan lain) dalam
+SATU proses Python (satu event loop asyncio).
 
 KENAPA INI PERLU:
-Sebelumnya kedua bot dijalankan sebagai 2 Railway service terpisah. Railway TIDAK
-mendukung shared volume/filesystem antar service (ini keterbatasan platform, bukan
-bug di kode). Akibatnya masing-masing service punya file `cosa_nostra.db` sendiri-
-sendiri yang terisolasi, sehingga koin/kepemilikan tidak pernah benar-benar sinkron
-walau kodenya identik.
+Railway TIDAK mendukung shared volume/filesystem antar service. Kalau tiap bot
+dijalankan sebagai service terpisah, masing-masing punya file `cosa_nostra.db`
+sendiri-sendiri yang terisolasi -> data tidak pernah benar-benar sinkron walau
+kodenya identik.
 
-Dengan menjalankan keduanya di 1 proses (1 service Railway), kedua bot otomatis
+Dengan menjalankan semua bot di 1 proses (1 service Railway), semuanya otomatis
 berbagi filesystem yang sama -> 1 file database fisik yang sama -> data selalu sinkron.
-SQLite WAL mode yang sudah dipakai di kedua file (`PRAGMA journal_mode=WAL`) memang
-didesain untuk skenario multi-writer seperti ini dalam satu mesin/proses.
 
-CARA DEPLOY DI RAILWAY:
-1. Pastikan HANYA ADA 1 Railway service untuk kedua bot ini (hapus/nonaktifkan
-   service kedua kalau sebelumnya terpisah).
+CARA NAMBAH BOT BARU LAGI (misal bot ke-4, ke-5, dst):
+1. Bikin file bot baru, pastikan:
+   - DB_NAME dihitung dari BASE_DIR/__file__ dengan pola yang sama seperti
+     operation_bot.py, vault_bot_tele.py, & lineage_bot.py (biar otomatis
+     nunjuk ke file db yang sama).
+   - main() dipecah jadi build_app() yang cuma pasang handler & return app
+     (JANGAN panggil app.run_polling() di dalam build_app()).
+   - Baca token dari env var baru, misal TELEGRAM_XXX_BOT_TOKEN.
+2. Import modulnya di bawah ini, lalu tambahkan ke dalam main() (lihat pola
+   op_app / vault_app / lineage_app di bawah).
+3. Tambah env var token barunya di Railway -> tab Variables (service yang sama,
+   TIDAK perlu bikin service baru).
+4. Push ke git seperti biasa -> Railway auto-redeploy.
+
+CARA DEPLOY DI RAILWAY (setup awal):
+1. Pastikan HANYA ADA 1 Railway service untuk semua bot ini.
 2. Set Start Command service tsb ke:  python bot_launcher.py
-3. Set kedua environment variable token di service yang sama:
+3. Set semua environment variable token di service yang sama:
    - TELEGRAM_OPERATIONS_BOT_TOKEN
    - TELEGRAM_VAULT_BOT_TOKEN
+   - TELEGRAM_LINEAGE_BOT_TOKEN
 4. (Opsional tapi disarankan) Attach 1 Railway Volume ke service ini dan arahkan
    BASE_DIR/cosa_nostra.db ke path volume tsb, supaya data tidak hilang tiap redeploy
    (filesystem Railway tanpa volume bersifat ephemeral).
@@ -32,6 +44,7 @@ import logging
 
 import operation_bot
 import vault_bot_tele
+import lineage_bot
 
 logging.basicConfig(
     level=logging.INFO,
@@ -61,11 +74,13 @@ async def stop_bot(app, label: str):
 async def main():
     op_app = operation_bot.build_app()
     vault_app = vault_bot_tele.build_app()
+    lineage_app = lineage_bot.build_app()
 
     await start_bot(op_app, "Operations Bot")
     await start_bot(vault_app, "Vault Bot")
+    await start_bot(lineage_app, "Lineage Bot")
 
-    logger.info("Both bots are running in a single process, sharing the same database file.")
+    logger.info("All bots are running in a single process, sharing the same database file.")
 
     stop_event = asyncio.Event()
     try:
@@ -73,6 +88,7 @@ async def main():
     finally:
         await stop_bot(op_app, "Operations Bot")
         await stop_bot(vault_app, "Vault Bot")
+        await stop_bot(lineage_app, "Lineage Bot")
 
 
 if __name__ == "__main__":
