@@ -1,15 +1,27 @@
 import os
-import aiosqlite
-import random
 import time
+import random
+import asyncio
+import logging
+import sqlite3
+import aiosqlite
 from datetime import datetime, timezone, timedelta
 from contextlib import asynccontextmanager
-from telegram import Update
+from telegram import (
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup
+)
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
-    ContextTypes
+    ContextTypes,
+    CallbackQueryHandler
 )
+
+# Set up Logging
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logger = logging.getLogger("operation_bot")
 
 # ==========================================
 # CONFIGURATION
@@ -21,15 +33,12 @@ TOKEN = os.getenv("TELEGRAM_OPERATIONS_BOT_TOKEN")
 if not TOKEN:
     raise ValueError("TELEGRAM_OPERATIONS_BOT_TOKEN belum diset di Variables Railway!")
 
-# Path Absolut agar kedua bot membaca file fisik database yang sama persis.
-# Kalau Railway Volume ter-attach ke service ini, RAILWAY_VOLUME_MOUNT_PATH
-# otomatis di-set oleh Railway -> database disimpan di sana (persist antar
-# redeploy, tidak ke-reset tiap kali push update). Kalau belum ada volume
-# (misal saat development lokal), fallback ke folder file ini sendiri.
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_DIR = os.getenv("RAILWAY_VOLUME_MOUNT_PATH", BASE_DIR)
 DB_NAME = os.path.join(DB_DIR, "cosa_nostra.db")
 WIB = timezone(timedelta(hours=7)) # UTC+7
+
+MY_PERMANENT_OWNER_ID = 8396793986
 
 # ==========================================
 # HELPER KONEKSI DATABASE (WAL MODE ENABLER)
@@ -90,7 +99,6 @@ async def sync_gelar_from_assets(db, user_id: int) -> str:
 
 async def get_or_create_user(db, user_id: int, username: str):
     """Fungsi standar untuk mengambil atau membuat data user secara konsisten berdasarkan user_id."""
-    # Pastikan tabel users terbuat sebelum query dilakukan
     await db.execute("""
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
@@ -123,7 +131,6 @@ async def get_or_create_user(db, user_id: int, username: str):
             await db.execute("UPDATE users SET username = ? WHERE user_id = ?", (username, user_id))
             await db.commit()
             
-        # Sinkronkan Gelar dari Assets secara otomatis
         await sync_gelar_from_assets(db, user_id)
         
         async with db.execute(f"SELECT {USER_COLUMNS} FROM users WHERE user_id = ?", (user_id,)) as cursor:
@@ -237,7 +244,6 @@ async def post_init(application):
     await init_db()
 
 async def check_admin_tier(db, user_id: int) -> int:
-    MY_PERMANENT_OWNER_ID = 8396793986  
     if user_id == MY_PERMANENT_OWNER_ID:
         return 4  
 
@@ -246,8 +252,39 @@ async def check_admin_tier(db, user_id: int) -> int:
         return row[0] if row and row[0] is not None else 0
 
 # ==========================================
-# PUBLIC COMMAND HANDLERS
+# GLOBAL ERROR HANDLER
 # ==========================================
+async def global_error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    logger.error(f"Exception occurred while handling an update: {context.error}", exc_info=context.error)
+    if isinstance(update, Update) and update.effective_message:
+        await update.effective_message.reply_text(
+            "⚠️ <b>Terjadi Kesalahan Teknis!</b>\n\n"
+            "Sistem baru saja mengalami kendala pemrosesan. Coba ulangi perintah sekali lagi.",
+            parse_mode="HTML"
+        )
+
+# ==========================================
+# SYSTEM SUB-MENU INTERAKTIF (INLINE KEYBOARD)
+# ==========================================
+def get_main_menu_keyboard():
+    keyboard = [
+        [
+            InlineKeyboardButton("👤 Profil & Status", callback_data="opmenu_profile"),
+            InlineKeyboardButton("🔨 Pekerjaan & Misi", callback_data="opmenu_jobs")
+        ],
+        [
+            InlineKeyboardButton("🎯 Target & Buronan", callback_data="opmenu_targets"),
+            InlineKeyboardButton("🏴‍☠️ Organisasi Crew", callback_data="opmenu_crew")
+        ],
+        [
+            InlineKeyboardButton("🛠️ Operations Admin", callback_data="opmenu_admin")
+        ]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+def get_back_button():
+    return InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Kembali ke Menu Utama", callback_data="opmenu_main")]])
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     current_username = update.effective_user.username or "TanpaUsername"
@@ -256,21 +293,89 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await get_or_create_user(db, user_id, current_username)
 
     text = (
-        "⚔️ WELCOME TO COSA NOSTRA OPERATIONS BOT\n\n"
-        "Gunakan command berikut untuk memulai aksi:\n"
-        "👤 /rekening - Status Profil & Vitality\n"
-        "🔨 /work - Kerja Harian\n"
-        "🎁 /daily - Klaim Bonus Harian\n"
-        "💼 /job [type] - Misi Operasi Bertingkat\n"
-        "🕵️ /crime [type] - Kejahatan Berisiko\n"
-        "🎯 /hit [user_id] - Eksekusi Target\n"
-        "💰 /bounty [user_id] [koin] - Pasang Kontrak\n"
-        "🚔 /wanted - Cek Daftar Buronan\n"
-        "🏴‍☠️ /crew - Manajemen Organisasi\n\n"
-        "🛠️ ADMINISTRATOR: /admin_panel"
+        "⚔️ <b>SELAMAT DATANG DI COSA NOSTRA OPERATIONS BOT!</b>\n\n"
+        "Silakan pilih kategori operasi yang ingin Anda akses melalui tombol interaktif di bawah ini: 😉✨"
     )
-    await update.message.reply_text(text)
+    if update.callback_query:
+        query = update.callback_query
+        await query.answer()
+        await query.edit_message_text(text, reply_markup=get_main_menu_keyboard(), parse_mode="HTML")
+    else:
+        await update.message.reply_text(text, reply_markup=get_main_menu_keyboard(), parse_mode="HTML")
 
+async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+
+    if data == "opmenu_main":
+        await start(update, context)
+
+    elif data == "opmenu_profile":
+        text = (
+            "👤 <b>SUB-MENU PROFIL & STATUS</b>\n\n"
+            "• <code>/rekening</code> — Status Profil, Koin, & Vitality\n"
+            "• <code>/daily</code> — Klaim bonus koin harian gratis"
+        )
+        await query.edit_message_text(text, reply_markup=get_back_button(), parse_mode="HTML")
+
+    elif data == "opmenu_jobs":
+        text = (
+            "🔨 <b>SUB-MENU PEKERJAAN & MISI OPERASI</b>\n\n"
+            "• <code>/work</code> — Kerjakan tugas harian\n"
+            "• <code>/job</code> — Cek daftar misi operasi bertingkat\n"
+            "• <code>/job [kode_job]</code> — Jalankan misi operasi tertentu\n"
+            "• <code>/crime</code> — Cek daftar opsi kejahatan berisiko\n"
+            "• <code>/crime [kode_crime]</code> — Eksekusi aksi kejahatan"
+        )
+        await query.edit_message_text(text, reply_markup=get_back_button(), parse_mode="HTML")
+
+    elif data == "opmenu_targets":
+        text = (
+            "🎯 <b>SUB-MENU TARGET & BURONAN</b>\n\n"
+            "• <code>/hit [user_id]</code> — Eksekusi target secara langsung\n"
+            "• <code>/bounty [user_id] [koin]</code> — Pasang kontrak imbalan buronan\n"
+            "• <code>/wanted</code> — Lihat daftar buronan paling dicari"
+        )
+        await query.edit_message_text(text, reply_markup=get_back_button(), parse_mode="HTML")
+
+    elif data == "opmenu_crew":
+        text = (
+            "🏴‍☠️ <b>SUB-MENU ORGANISASI CREW</b>\n\n"
+            "• <code>/crew</code> — Cek info status Crew kamu\n"
+            "• <code>/crew create [nama]</code> — Bikin Crew baru (Biaya: 50.000 Koin)\n"
+            "• <code>/crew donate [jumlah]</code> — Setor donasi koin ke kas Crew"
+        )
+        await query.edit_message_text(text, reply_markup=get_back_button(), parse_mode="HTML")
+
+    elif data == "opmenu_admin":
+        user_id = update.effective_user.id
+        async with get_db_connection() as db:
+            tier = await check_admin_tier(db, user_id)
+            if tier == 0:
+                return await query.edit_message_text(
+                    "🚫 <b>AKSES DITOLAK:</b> Anda tidak memiliki otoritas Administrator.",
+                    reply_markup=get_back_button(),
+                    parse_mode="HTML"
+                )
+
+            text = (
+                f"🛠️ <b>OPERATIONS ADMIN PANEL</b>\n\n"
+                f"Level Otoritas Anda: <b>Tier {tier}</b>\n\n"
+                f"<b>Fitur Admin:</b>\n"
+                f"• <code>/jail_user [user_id] [jam]</code> (Tier 1+)\n"
+                f"• <code>/unjail_user [user_id]</code> (Tier 2+)\n"
+                f"• <code>/clear_heat [user_id]</code> (Tier 3+)\n\n"
+                f"<b>Fitur Cheat Admin:</b>\n"
+                f"• <code>/cheat_godmode [target_id]</code> (Tier 1+)\n"
+                f"• <code>/cheat_instant_work [target_id]</code> (Tier 1+)\n"
+                f"• <code>/cheat_clear_bounty [target_id]</code> (Tier 1+)"
+            )
+            await query.edit_message_text(text, reply_markup=get_back_button(), parse_mode="HTML")
+
+# ==========================================
+# PUBLIC COMMAND HANDLERS
+# ==========================================
 async def cmd_rekening(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     current_username = update.effective_user.username or "TanpaUsername"
@@ -303,21 +408,21 @@ async def cmd_rekening(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     crew_name = c_row[0]
 
         text = (
-            f"👤 *PROFIL ANGGOTA COSA NOSTRA*\n\n"
-            f"Nama: *@{db_username}* (`{user_id}`)\n"
-            f"Gelar Pangkat: *{gelar}*\n"
-            f"Crew: *{crew_name}*\n"
+            f"👤 <b>PROFIL ANGGOTA COSA NOSTRA</b>\n\n"
+            f"Nama: <b>@{db_username}</b> (<code>{user_id}</code>)\n"
+            f"Gelar Pangkat: <b>{gelar}</b>\n"
+            f"Crew: <b>{crew_name}</b>\n"
             f"───────────────────\n"
-            f"💵 Cash Tunai: *{koin:,} Koin*\n"
-            f"🏦 Tabungan Bank: *{bank_balance:,} Koin*\n"
-            f"⚡ Vitality: *{vitality}%*\n"
-            f"🔥 Heat Level: *{heat}*\n"
-            f"🏆 Respect: *{respect}*\n"
-            f"🎯 Bounty: *{bounty:,} Koin*\n"
+            f"💵 Cash Tunai: <b>{koin:,} Koin</b>\n"
+            f"🏦 Tabungan Bank: <b>{bank_balance:,} Koin</b>\n"
+            f"⚡ Vitality: <b>{vitality}%</b>\n"
+            f"🔥 Heat Level: <b>{heat}</b>\n"
+            f"🏆 Respect: <b>{respect}</b>\n"
+            f"🎯 Bounty: <b>{bounty:,} Koin</b>\n"
             f"Status Hukum: {jail_status}"
         )
         
-        await update.message.reply_text(text, parse_mode="Markdown")
+        await update.message.reply_text(text, parse_mode="HTML")
 
 async def cmd_work(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -331,12 +436,12 @@ async def cmd_work(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return await update.message.reply_text("🔒 Anda sedang dalam sel penjara! Tidak dapat bekerja.")
 
         if user[5] < 20:
-            return await update.message.reply_text("⚡ Vitality Anda terlalu rendah (<20%)! Beli makanan di Vault Bot (`/shop makanan`).")
+            return await update.message.reply_text("⚡ Vitality Anda terlalu rendah (<20%)! Beli makanan di Vault Bot (<code>/shop makanan</code>).", parse_mode="HTML")
 
         last_work = user[13]
         if now_epoch - last_work < 3600:
             rem = 3600 - (now_epoch - last_work)
-            return await update.message.reply_text(f"⏳ Istirahat dulu! Bekerja lagi dalam **{rem//60}m {rem%60}s**.", parse_mode="Markdown")
+            return await update.message.reply_text(f"⏳ Istirahat dulu! Bekerja lagi dalam <b>{rem//60}m {rem%60}s</b>.", parse_mode="HTML")
 
         gelar = user[6]
         base_pay = random.randint(500, 1200)
@@ -352,12 +457,12 @@ async def cmd_work(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await db.commit()
 
         await update.message.reply_text(
-            f"🔨 *KERJA SELESAI!*\n\n"
+            f"🔨 <b>KERJA SELESAI!</b>\n\n"
             f"Gaji Dasar: +{base_pay:,} Koin\n"
             f"Bonus Gelar ({gelar}): +{gelar_bonus:,} Koin\n"
-            f"Total Diterima: *+{total_income:,} Koin*\n"
+            f"Total Diterima: <b>+{total_income:,} Koin</b>\n"
             f"Vitality Terkuras: -15% (Sisa: {new_vit}%)",
-            parse_mode="Markdown"
+            parse_mode="HTML"
         )
 
 async def cmd_daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -371,13 +476,13 @@ async def cmd_daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if now_epoch - last_daily < 86400:
             rem = 86400 - (now_epoch - last_daily)
-            return await update.message.reply_text(f"⏳ Klaim harian berikutnya dalam **{rem//3600}j {(rem%3600)//60}m**.", parse_mode="Markdown")
+            return await update.message.reply_text(f"⏳ Klaim harian berikutnya dalam <b>{rem//3600}j {(rem%3600)//60}m</b>.", parse_mode="HTML")
 
         reward = 2000
         await db.execute("UPDATE users SET koin = koin + ?, last_daily = ? WHERE user_id = ?", (reward, now_epoch, user_id))
         await db.commit()
 
-        await update.message.reply_text(f"🎁 *BONUS HARIAN:* Anda mendapatkan *+{reward:,} Koin*!", parse_mode="Markdown")
+        await update.message.reply_text(f"🎁 <b>BONUS HARIAN:</b> Anda mendapatkan <b>+{reward:,} Koin</b>!", parse_mode="HTML")
 
 async def cmd_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
@@ -397,8 +502,8 @@ async def cmd_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if now_epoch < job_finish:
                 rem = job_finish - now_epoch
                 return await update.message.reply_text(
-                    f"⏳ Sedang menjalankan **{JOBS[active_job]['name']}**. Selesai dalam **{rem//3600}j {(rem%3600)//60}m {rem%60}s**.",
-                    parse_mode="Markdown"
+                    f"⏳ Sedang menjalankan <b>{JOBS[active_job]['name']}</b>. Selesai dalam <b>{rem//3600}j {(rem%3600)//60}m {rem%60}s</b>.",
+                    parse_mode="HTML"
                 )
             else:
                 j_info = JOBS[active_job]
@@ -409,15 +514,15 @@ async def cmd_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 await db.commit()
                 return await update.message.reply_text(
-                    f"🎉 *MISI BERHASIL!*\n\nAnda menyelesaikan **{j_info['name']}** dan mendapatkan *+{reward:,} Koin*!",
-                    parse_mode="Markdown"
+                    f"🎉 <b>MISI BERHASIL!</b>\n\nAnda menyelesaikan <b>{j_info['name']}</b> dan mendapatkan <b>+{reward:,} Koin</b>!",
+                    parse_mode="HTML"
                 )
 
         if not args:
-            text = "💼 *DAFTAR MISI JOB TERSEDIA*\n\nGunakan `/job [job_code]` untuk memulai:\n\n"
+            text = "💼 <b>DAFTAR MISI JOB TERSEDIA</b>\n\nGunakan <code>/job [job_code]</code> untuk memulai:\n\n"
             for code, j in JOBS.items():
-                text += f"• `[{code}]` *{j['name']}* ({j['tier']}+)\n  Durasi: {j['dur']//3600}j | Hasil: {j['min']:,}-{j['max']:,} Koin\n"
-            return await update.message.reply_text(text, parse_mode="Markdown")
+                text += f"• <code>[{code}]</code> <b>{j['name']}</b> ({j['tier']}+)\n  Durasi: {j['dur']//3600}j | Hasil: {j['min']:,}-{j['max']:,} Koin\n"
+            return await update.message.reply_text(text, parse_mode="HTML")
 
         job_code = args[0].lower()
         if job_code not in JOBS:
@@ -429,7 +534,7 @@ async def cmd_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
         req_tier_num = int(j["tier"].replace("G", ""))
 
         if user_tier_num < req_tier_num:
-            return await update.message.reply_text(f"🔒 **AKSES DITOLAK:** Misi ini membutuhkan minimal gelar **{j['tier']}**!", parse_mode="Markdown")
+            return await update.message.reply_text(f"🔒 <b>AKSES DITOLAK:</b> Misi ini membutuhkan minimal gelar <b>{j['tier']}</b>!", parse_mode="HTML")
 
         if user[5] < j["vit"]:
             return await update.message.reply_text(f"⚡ Vitality tidak cukup! Membutuhkan {j['vit']}% Vitality.")
@@ -444,11 +549,11 @@ async def cmd_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await db.commit()
 
         await update.message.reply_text(
-            f"🚀 *MISI DIMULAI: {j['name']}*\n\n"
+            f"🚀 <b>MISI DIMULAI: {j['name']}</b>\n\n"
             f"Durasi: {j['dur']//3600} Jam\n"
             f"Proyeksi Hasil: {j['min']:,} - {j['max']:,} Koin\n"
-            f"Ketik `/job` kembali setelah durasi selesai untuk mengambil hasil.",
-            parse_mode="Markdown"
+            f"Ketik <code>/job</code> kembali setelah durasi selesai untuk mengambil hasil.",
+            parse_mode="HTML"
         )
 
 async def cmd_crime(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -464,10 +569,10 @@ async def cmd_crime(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return await update.message.reply_text("🔒 Anda sedang mendekam di sel penjara!")
 
         if not args:
-            text = "🕵️ *DAFTAR AKSI KEJAHATAN*\n\nGunakan `/crime [crime_code]`:\n\n"
+            text = "🕵️ <b>DAFTAR AKSI KEJAHATAN</b>\n\nGunakan <code>/crime [crime_code]</code>:\n\n"
             for code, c in CRIMES.items():
-                text += f"• `[{code}]` *{c['desc']}*\n  Hasil: {c['min']:,}-{c['max']:,} Koin | Risiko Tertangkap: {c['risk']}%\n"
-            return await update.message.reply_text(text, parse_mode="Markdown")
+                text += f"• <code>[{code}]</code> <b>{c['desc']}</b>\n  Hasil: {c['min']:,}-{c['max']:,} Koin | Risiko Tertangkap: {c['risk']}%\n"
+            return await update.message.reply_text(text, parse_mode="HTML")
 
         crime_code = args[0].lower()
         if crime_code not in CRIMES:
@@ -486,11 +591,11 @@ async def cmd_crime(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await db.commit()
 
             return await update.message.reply_text(
-                f"🚨 *AKSI GAGAL! ANDA TERTANGKAP POLISI!*\n\n"
+                f"🚨 <b>AKSI GAGAL! ANDA TERTANGKAP POLISI!</b>\n\n"
                 f"Denda Disita: -{fine:,} Koin\n"
                 f"Heat Bertambah: +{c['heat']}\n"
                 f"Mendekam di Penjara: {c['jail']//3600} Jam",
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
 
         loot = random.randint(c["min"], c["max"])
@@ -501,11 +606,11 @@ async def cmd_crime(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await db.commit()
 
         await update.message.reply_text(
-            f"🎭 *AKSI KEJAHATAN SUKSES!*\n\n"
-            f"Hasil Rampokan: *+{loot:,} Koin*\n"
+            f"🎭 <b>AKSI KEJAHATAN SUKSES!</b>\n\n"
+            f"Hasil Rampokan: <b>+{loot:,} Koin</b>\n"
             f"Respect Bertambah: +10\n"
             f"Heat Level: +{c['heat']//2}",
-            parse_mode="Markdown"
+            parse_mode="HTML"
         )
 
 async def cmd_bounty(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -514,7 +619,7 @@ async def cmd_bounty(update: Update, context: ContextTypes.DEFAULT_TYPE):
     current_username = update.effective_user.username or "TanpaUsername"
 
     if len(args) < 2 or not args[0].isdigit() or not args[1].isdigit():
-        return await update.message.reply_text("❌ Format: `/bounty [target_user_id] [jumlah_koin]`", parse_mode="Markdown")
+        return await update.message.reply_text("❌ Format: <code>/bounty [target_user_id] [jumlah_koin]</code>", parse_mode="HTML")
 
     target_id = int(args[0])
     bounty_amount = int(args[1])
@@ -539,7 +644,7 @@ async def cmd_bounty(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await db.execute("UPDATE users SET bounty = bounty + ? WHERE user_id = ?", (bounty_amount, target_id))
         await db.commit()
 
-    await update.message.reply_text(f"🎯 *KONTRAK DIPASANG:* Sayembara sebesar *{bounty_amount:,} Koin* terpasang untuk kepala ID `{target_id}`!", parse_mode="Markdown")
+    await update.message.reply_text(f"🎯 <b>KONTRAK DIPASANG:</b> Sayembara sebesar <b>{bounty_amount:,} Koin</b> terpasang untuk kepala ID <code>{target_id}</code>!", parse_mode="HTML")
 
 async def cmd_hit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
@@ -548,7 +653,7 @@ async def cmd_hit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     now_epoch = int(time.time())
 
     if not args or not args[0].isdigit():
-        return await update.message.reply_text("❌ Format: `/hit [target_user_id]`", parse_mode="Markdown")
+        return await update.message.reply_text("❌ Format: <code>/hit [target_user_id]</code>", parse_mode="HTML")
 
     target_id = int(args[0])
     if target_id == user_id:
@@ -577,19 +682,19 @@ async def cmd_hit(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await db.commit()
 
             return await update.message.reply_text(
-                f"☠️ *EKSEKUSI HIT BERHASIL!*\n\n"
-                f"Target `{target_id}` berhasil dieksekusi!\n"
+                f"☠️ <b>EKSEKUSI HIT BERHASIL!</b>\n\n"
+                f"Target <code>{target_id}</code> berhasil dieksekusi!\n"
                 f"Koin Dirampok: {stolen_cash:,} Koin\n"
                 f"Bounty Diklaim: {target_bounty:,} Koin\n"
-                f"Total Hasil: *+{total_prize:,} Koin*",
-                parse_mode="Markdown"
+                f"Total Hasil: <b>+{total_prize:,} Koin</b>",
+                parse_mode="HTML"
             )
         else:
             jail_until = now_epoch + 7200
             await db.execute("UPDATE users SET jailed_until = ? WHERE user_id = ?", (jail_until, user_id))
             await db.commit()
 
-            return await update.message.reply_text(f"❌ *HIT GAGAL!* Target meloloskan diri dan Anda dijebloskan ke penjara selama 2 jam.")
+            return await update.message.reply_text("❌ <b>HIT GAGAL!</b> Target meloloskan diri dan Anda dijebloskan ke penjara selama 2 jam.", parse_mode="HTML")
 
 async def cmd_wanted(update: Update, context: ContextTypes.DEFAULT_TYPE):
     async with get_db_connection() as db:
@@ -599,12 +704,12 @@ async def cmd_wanted(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not wanted_list:
             return await update.message.reply_text("🕊️ Saat ini tidak ada kontrak buronan aktif.")
 
-        text = "🚔 *DAFTAR BURONAN COSA NOSTRA*\n\n"
+        text = "🚔 <b>DAFTAR BURONAN COSA NOSTRA</b>\n\n"
         for idx, (u_id, name, b_val) in enumerate(wanted_list, 1):
-            text += f"{idx}. *@{name}* (`{u_id}`) - 🎯 *{b_val:,} Koin*\n"
+            text += f"{idx}. <b>@{name}</b> (<code>{u_id}</code>) - 🎯 <b>{b_val:,} Koin</b>\n"
 
-        text += "\nGunakan `/hit [user_id]` untuk mengeksekusi buronan."
-        await update.message.reply_text(text, parse_mode="Markdown")
+        text += "\nGunakan <code>/hit [user_id]</code> untuk mengeksekusi buronan."
+        await update.message.reply_text(text, parse_mode="HTML")
 
 async def cmd_crew(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
@@ -619,22 +724,22 @@ async def cmd_crew(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not args:
             if user_crew_id == 0:
                 text = (
-                    "🏴‍☠️ *SISTEM ORGANISASI CREW*\n\n"
+                    "🏴‍☠️ <b>SISTEM ORGANISASI CREW</b>\n\n"
                     "Anda belum bergabung dengan crew apa pun.\n"
-                    "• `/crew create [nama_crew]` - Buat Crew baru (Biaya: 50.000 Koin)\n"
-                    "• `/crew join [nama_crew]` - Bergabung dengan Crew"
+                    "• <code>/crew create [nama_crew]</code> - Buat Crew baru (Biaya: 50.000 Koin)\n"
+                    "• <code>/crew join [nama_crew]</code> - Bergabung dengan Crew"
                 )
             else:
                 async with db.execute("SELECT crew_name, treasury, respect FROM crews WHERE crew_id = ?", (user_crew_id,)) as c_cur:
                     c_info = await c_cur.fetchone()
                 text = (
-                    f"🏴‍☠️ *CREW ANDA: {c_info[0]}*\n\n"
-                    f"💰 Kas Treasury: *{c_info[1]:,} Koin*\n"
-                    f"🏆 Crew Respect: *{c_info[2]}*\n\n"
+                    f"🏴‍☠️ <b>CREW ANDA: {c_info[0]}</b>\n\n"
+                    f"💰 Kas Treasury: <b>{c_info[1]:,} Koin</b>\n"
+                    f"🏆 Crew Respect: <b>{c_info[2]}</b>\n\n"
                     f"Command:\n"
-                    f"• `/crew donate [jumlah]` - Salurkan kas ke treasury"
+                    f"• <code>/crew donate [jumlah]</code> - Salurkan kas ke treasury"
                 )
-            return await update.message.reply_text(text, parse_mode="Markdown")
+            return await update.message.reply_text(text, parse_mode="HTML")
 
         action = args[0].lower()
 
@@ -658,7 +763,7 @@ async def cmd_crew(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await db.execute("UPDATE users SET crew_id = ? WHERE user_id = ?", (new_crew_id, user_id))
             await db.commit()
 
-            return await update.message.reply_text(f"🏴‍☠️ **CREW BERHASIL DIBUAT:** Selamat mendirikan **{crew_name}**!", parse_mode="Markdown")
+            return await update.message.reply_text(f"🏴‍☠️ <b>CREW BERHASIL DIBUAT:</b> Selamat mendirikan <b>{crew_name}</b>!", parse_mode="HTML")
 
         elif action == "donate":
             if user_crew_id == 0:
@@ -674,7 +779,7 @@ async def cmd_crew(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await db.execute("UPDATE crews SET treasury = treasury + ? WHERE crew_id = ?", (donate_amount, user_crew_id))
             await db.commit()
 
-            return await update.message.reply_text(f"✅ Berhasil mendonasikan *{donate_amount:,} Koin* ke Treasury Crew.", parse_mode="Markdown")
+            return await update.message.reply_text(f"✅ Berhasil mendonasikan <b>{donate_amount:,} Koin</b> ke Treasury Crew.", parse_mode="HTML")
 
 # ==========================================
 # ADMIN & CHEAT COMMANDS
@@ -684,21 +789,21 @@ async def cmd_admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     async with get_db_connection() as db:
         tier = await check_admin_tier(db, user_id)
         if tier == 0:
-            return await update.message.reply_text("🚫 **AKSES DITOLAK:** Anda tidak memiliki otoritas Administrator.")
+            return await update.message.reply_text("🚫 <b>AKSES DITOLAK:</b> Anda tidak memiliki otoritas Administrator.", parse_mode="HTML")
 
         text = (
-            f"🛠️ *OPERATIONS ADMIN & CHEAT PANEL*\n\n"
-            f"Level Otoritas Anda: *Tier {tier}*\n\n"
-            f"*Fitur Admin:*\n"
-            f"• `/jail_user [user_id] [jam]`\n"
-            f"• `/unjail_user [user_id]`\n"
-            f"• `/clear_heat [user_id]`\n\n"
-            f"*Fitur Cheat Admin:*\n"
-            f"• `/cheat_godmode [target_id]`\n"
-            f"• `/cheat_instant_work [target_id]`\n"
-            f"• `/cheat_clear_bounty [target_id]`"
+            f"🛠️ <b>OPERATIONS ADMIN & CHEAT PANEL</b>\n\n"
+            f"Level Otoritas Anda: <b>Tier {tier}</b>\n\n"
+            f"<b>Fitur Admin:</b>\n"
+            f"• <code>/jail_user [user_id] [jam]</code>\n"
+            f"• <code>/unjail_user [user_id]</code>\n"
+            f"• <code>/clear_heat [user_id]</code>\n\n"
+            f"<b>Fitur Cheat Admin:</b>\n"
+            f"• <code>/cheat_godmode [target_id]</code>\n"
+            f"• <code>/cheat_instant_work [target_id]</code>\n"
+            f"• <code>/cheat_clear_bounty [target_id]</code>"
         )
-        await update.message.reply_text(text, parse_mode="Markdown")
+        await update.message.reply_text(text, parse_mode="HTML")
 
 async def cmd_cheat_godmode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -706,7 +811,7 @@ async def cmd_cheat_godmode(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     async with get_db_connection() as db:
         if await check_admin_tier(db, user_id) < 1:
-            return await update.message.reply_text("🚫 **CHEAT DITOLAK:** Anda tidak memiliki akses Admin!")
+            return await update.message.reply_text("🚫 <b>CHEAT DITOLAK:</b> Anda tidak memiliki akses Admin!", parse_mode="HTML")
 
         await db.execute(
             "UPDATE users SET vitality = 100, heat = 0, jailed_until = 0 WHERE user_id = ?",
@@ -715,8 +820,8 @@ async def cmd_cheat_godmode(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await db.commit()
 
         await update.message.reply_text(
-            f"🧪 **GODMODE ACTIVATED!**\n\nTarget ID: `{target_id}`\n⚡ Vitality: **100%**\n🔥 Heat Level: **0**\n🔓 Status Hukum: **BEBAS PENJARA**",
-            parse_mode="Markdown"
+            f"🧪 <b>GODMODE ACTIVATED!</b>\n\nTarget ID: <code>{target_id}</code>\n⚡ Vitality: <b>100%</b>\n🔥 Heat Level: <b>0</b>\n🔓 Status Hukum: <b>BEBAS PENJARA</b>",
+            parse_mode="HTML"
         )
 
 async def cmd_cheat_instant_work(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -725,7 +830,7 @@ async def cmd_cheat_instant_work(update: Update, context: ContextTypes.DEFAULT_T
 
     async with get_db_connection() as db:
         if await check_admin_tier(db, user_id) < 1:
-            return await update.message.reply_text("🚫 **CHEAT DITOLAK:** Anda tidak memiliki akses Admin!")
+            return await update.message.reply_text("🚫 <b>CHEAT DITOLAK:</b> Anda tidak memiliki akses Admin!", parse_mode="HTML")
 
         await db.execute(
             "UPDATE users SET last_work = 0, last_daily = 0, job_finish_time = 1 WHERE user_id = ?",
@@ -734,8 +839,8 @@ async def cmd_cheat_instant_work(update: Update, context: ContextTypes.DEFAULT_T
         await db.commit()
 
         await update.message.reply_text(
-            f"🧪 **INSTANT RESET ACTIVATED!**\n\nTarget ID: `{target_id}`\n• Cooldown `/work` & `/daily` di-reset ke 0!\n• Job aktif siap diklaim sekarang (`/job`).",
-            parse_mode="Markdown"
+            f"🧪 <b>INSTANT RESET ACTIVATED!</b>\n\nTarget ID: <code>{target_id}</code>\n• Cooldown <code>/work</code> & <code>/daily</code> di-reset ke 0!\n• Job aktif siap diklaim sekarang (<code>/job</code>).",
+            parse_mode="HTML"
         )
 
 async def cmd_cheat_clear_bounty(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -744,12 +849,12 @@ async def cmd_cheat_clear_bounty(update: Update, context: ContextTypes.DEFAULT_T
 
     async with get_db_connection() as db:
         if await check_admin_tier(db, user_id) < 1:
-            return await update.message.reply_text("🚫 **CHEAT DITOLAK:** Anda tidak memiliki akses Admin!")
+            return await update.message.reply_text("🚫 <b>CHEAT DITOLAK:</b> Anda tidak memiliki akses Admin!", parse_mode="HTML")
 
         await db.execute("UPDATE users SET bounty = 0 WHERE user_id = ?", (target_id,))
         await db.commit()
 
-        await update.message.reply_text(f"🧪 **ADMIN CHEAT:** Bounty pada User ID `{target_id}` telah dibersihkan!", parse_mode="Markdown")
+        await update.message.reply_text(f"🧪 <b>ADMIN CHEAT:</b> Bounty pada User ID <code>{target_id}</code> telah dibersihkan!", parse_mode="HTML")
 
 async def cmd_jail_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -759,7 +864,7 @@ async def cmd_jail_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return await update.message.reply_text("🚫 Butuh akses Admin Tier 1+.")
 
         if len(context.args) < 2:
-            return await update.message.reply_text("❌ Format: `/jail_user [target_id] [jam]`")
+            return await update.message.reply_text("❌ Format: <code>/jail_user [target_id] [jam]</code>", parse_mode="HTML")
 
         target_id = int(context.args[0])
         hours = int(context.args[1])
@@ -768,7 +873,7 @@ async def cmd_jail_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await db.execute("UPDATE users SET jailed_until = ? WHERE user_id = ?", (jail_time, target_id))
         await db.commit()
 
-        await update.message.reply_text(f"🔒 Target `{target_id}` berhasil dipenjara selama **{hours} jam**.", parse_mode="Markdown")
+        await update.message.reply_text(f"🔒 Target <code>{target_id}</code> berhasil dipenjara selama <b>{hours} jam</b>.", parse_mode="HTML")
 
 async def cmd_unjail_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -778,13 +883,13 @@ async def cmd_unjail_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return await update.message.reply_text("🚫 Butuh akses Admin Tier 2+.")
 
         if not context.args:
-            return await update.message.reply_text("❌ Format: `/unjail_user [target_id]`")
+            return await update.message.reply_text("❌ Format: <code>/unjail_user [target_id]</code>", parse_mode="HTML")
 
         target_id = int(context.args[0])
         await db.execute("UPDATE users SET jailed_until = 0 WHERE user_id = ?", (target_id,))
         await db.commit()
 
-        await update.message.reply_text(f"🔓 Target `{target_id}` telah dibebaskan dari penjara.", parse_mode="Markdown")
+        await update.message.reply_text(f"🔓 Target <code>{target_id}</code> telah dibebaskan dari penjara.", parse_mode="HTML")
 
 async def cmd_clear_heat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -794,25 +899,27 @@ async def cmd_clear_heat(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return await update.message.reply_text("🚫 Butuh akses Admin Tier 3+.")
 
         if not context.args:
-            return await update.message.reply_text("❌ Format: `/clear_heat [target_id]`")
+            return await update.message.reply_text("❌ Format: <code>/clear_heat [target_id]</code>", parse_mode="HTML")
 
         target_id = int(context.args[0])
         await db.execute("UPDATE users SET heat = 0 WHERE user_id = ?", (target_id,))
         await db.commit()
 
-        await update.message.reply_text(f"🔥 Heat Level target `{target_id}` diset kembali ke 0.", parse_mode="Markdown")
+        await update.message.reply_text(f"🔥 Heat Level target <code>{target_id}</code> diset kembali ke 0.", parse_mode="HTML")
 
 # ==========================================
 # MAIN FUNCTION
 # ==========================================
 def build_app():
-    """Membangun Application (handlers terpasang) tanpa langsung menjalankan polling.
-    Dipisah dari main() supaya bot ini bisa dijalankan sendiri (standalone)
-    ATAU digabung dengan bot lain dalam satu proses lewat bot_launcher.py."""
     app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
 
-    # Public Operations Commands
+    app.add_error_handler(global_error_handler)
+
+    # Public Navigation & Callback Handlers
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(menu_callback_handler, pattern="^opmenu_"))
+
+    # Public Operations Commands
     app.add_handler(CommandHandler("rekening", cmd_rekening))
     app.add_handler(CommandHandler("work", cmd_work))
     app.add_handler(CommandHandler("daily", cmd_daily))
@@ -835,6 +942,7 @@ def build_app():
     return app
 
 def main():
+    asyncio.run(init_db())
     app = build_app()
     print("⚔️ Telegram Cosa Nostra Operations Bot Running...")
     app.run_polling()
