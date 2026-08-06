@@ -4,6 +4,7 @@ import random
 import hashlib
 import asyncio
 import logging
+import sqlite3
 import aiosqlite
 from datetime import datetime, timezone, timedelta
 from contextlib import asynccontextmanager
@@ -286,6 +287,25 @@ async def expire_proposals_loop():
             logger.error(f"[lineage_bot] expire_proposals_loop error: {e}")
         await asyncio.sleep(PROPOSAL_EXPIRY_CHECK_INTERVAL)
 
+# Helper On-Demand untuk memastikan tabel ketersediaan proposal & pernikahan
+async def ensure_proposals_table(db):
+    try:
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS marriage_proposals (
+                proposal_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                proposer_id INTEGER NOT NULL,
+                target_id INTEGER NOT NULL,
+                proposal_type TEXT NOT NULL DEFAULT 'conventional',
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at INTEGER NOT NULL,
+                expires_at INTEGER NOT NULL,
+                responded_at INTEGER
+            )
+        """)
+        await db.commit()
+    except Exception as e:
+        logger.warning(f"ensure_proposals_table warning: {e}")
+
 # ==========================================
 # GLOBAL ERROR HANDLER (RESEPSIONIS PERSO)
 # ==========================================
@@ -366,7 +386,8 @@ async def get_active_marriage(db, user_id: int):
             (user_id, user_id)
         ) as cursor:
             return await cursor.fetchone()
-    except aiosqlite.OperationalError:
+    except Exception:
+        # Jika terjadi error skema DB/belum ada data, kembalikan None (pasti belum nikah)
         return None
 
 async def get_active_family_membership(db, user_id: int):
@@ -377,7 +398,7 @@ async def get_active_family_membership(db, user_id: int):
             (user_id,)
         ) as cursor:
             return await cursor.fetchone()
-    except aiosqlite.OperationalError:
+    except Exception:
         return None
 
 async def is_ancestor(db, potential_ancestor_id: int, of_user_id: int, max_depth: int = 20) -> bool:
@@ -403,7 +424,7 @@ async def is_ancestor(db, potential_ancestor_id: int, of_user_id: int, max_depth
                     next_frontier.append(parent_id)
             frontier = next_frontier
             depth += 1
-        except aiosqlite.OperationalError:
+        except Exception:
             break
     return False
 
@@ -419,7 +440,7 @@ async def is_relative(db, user_a_id: int, user_b_id: int) -> bool:
         ) as cursor:
             if await cursor.fetchone():
                 return True
-    except aiosqlite.OperationalError:
+    except Exception:
         pass
 
     try:
@@ -430,7 +451,7 @@ async def is_relative(db, user_a_id: int, user_b_id: int) -> bool:
         ) as cursor:
             if await cursor.fetchone():
                 return True
-    except aiosqlite.OperationalError:
+    except Exception:
         pass
 
     return False
@@ -572,6 +593,7 @@ async def cmd_tree(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_propose(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     target_id = parse_target_id(context)
+    
     if target_id is None:
         return await update.message.reply_text(
             "💁‍♀️ <b>Eits, Mau Lamar Siapa Kak?</b>\n\n"
@@ -580,6 +602,7 @@ async def cmd_propose(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Contoh: <code>/propose 123456789 modern</code>",
             parse_mode="HTML"
         )
+        
     if target_id == user_id:
         return await update.message.reply_text("😅 Ya ampun Kak... Masak melamar diri sendiri? Cari gebetan dulu gih sana!")
 
@@ -588,6 +611,9 @@ async def cmd_propose(update: Update, context: ContextTypes.DEFAULT_TYPE):
         m_type = context.args[1].lower()
 
     async with get_db_connection() as db:
+        # 1. Pastikan tabel marriage_proposals siap secara terisolasi
+        await ensure_proposals_table(db)
+
         if not await ensure_user_registered(update, db, user_id):
             return
 
@@ -599,49 +625,61 @@ async def cmd_propose(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode="HTML"
             )
 
-        if await get_active_marriage(db, user_id):
+        # 2. Cek status pernikahan via helper terisolasi (Mencegah salah kaprah ke tabel proposal)
+        user_marriage = await get_active_marriage(db, user_id)
+        if user_marriage:
             return await update.message.reply_text(
                 "💍 <b>Eits, Jangan Maruk Kak!</b>\n\n"
                 "Kakak kan udah menikah! Kalau mau lamar orang lain, harus cerai dulu pakai <code>/divorce</code>.",
                 parse_mode="HTML"
             )
-        if await get_active_marriage(db, target_id):
+            
+        target_marriage = await get_active_marriage(db, target_id)
+        if target_marriage:
             return await update.message.reply_text(
                 f"💔 <b>Aduh, Telat Kak!</b>\n\n"
                 f"User <code>{target_id}</code> udah ada yang punya. Cari target lain yang masih jomblo ya~",
                 parse_mode="HTML"
             )
 
+        # 3. Cek Relasi Kekeluargaan
         if await is_relative(db, user_id, target_id):
             return await update.message.reply_text("🚫 <b>Ditolak Sistem:</b> Kakak tidak bisa melamar anggota keluarga kandung/relasi dekat sendiri ya!")
 
+        # 4. Limitasi Harian (Safe Query)
         since_epoch = int(time.time()) - 86400
-        
-        # PERBAIKAN: Dibungkus dengan try-except aiosqlite.OperationalError[cite: 2]
+        count_today = 0
         try:
             async with db.execute(
                 "SELECT COUNT(*) FROM marriage_proposals WHERE proposer_id = ? AND created_at > ?",
                 (user_id, since_epoch)
             ) as cursor:
-                count_today = (await cursor.fetchone())[0]
-        except aiosqlite.OperationalError:
+                row = await cursor.fetchone()
+                count_today = row[0] if row else 0
+        except Exception:
             count_today = 0
 
         if count_today >= MAX_PROPOSALS_PER_DAY:
             return await update.message.reply_text(f"🛑 Waduh, Kakak gercep banget! Udah kirim {MAX_PROPOSALS_PER_DAY} lamaran hari ini. Istirahat dulu, coba lagi besok ya!")
 
+        # 5. Cek Proposal Pending ke Target Sama (Safe Query)
+        has_pending = False
         try:
             async with db.execute(
                 "SELECT 1 FROM marriage_proposals WHERE proposer_id = ? AND target_id = ? AND status = 'pending'",
                 (user_id, target_id)
             ) as cursor:
-                if await cursor.fetchone():
-                    return await update.message.reply_text("⏳ Lamaran Kakak ke doi masih pending nih. Tunggu dijawab dulu ya~")
-        except aiosqlite.OperationalError:
-            pass
+                has_pending = (await cursor.fetchone()) is not None
+        except Exception:
+            has_pending = False
 
+        if has_pending:
+            return await update.message.reply_text("⏳ Lamaran Kakak ke doi masih pending nih. Tunggu dijawab dulu ya~")
+
+        # 6. Eksekusi Kirim Proposal
         now_epoch = int(time.time())
         expires_at = now_epoch + PROPOSAL_TTL_SECONDS
+        
         await db.execute(
             "INSERT INTO marriage_proposals (proposer_id, target_id, proposal_type, status, created_at, expires_at) VALUES (?, ?, ?, 'pending', ?, ?)",
             (user_id, target_id, m_type, now_epoch, expires_at)
@@ -666,6 +704,7 @@ async def cmd_accept_proposal(update: Update, context: ContextTypes.DEFAULT_TYPE
         return await update.message.reply_text("💁‍♀️ Formatnya: <code>/accept_proposal [proposer_id]</code> ya Kak!", parse_mode="HTML")
 
     async with get_db_connection() as db:
+        await ensure_proposals_table(db)
         if not await ensure_user_registered(update, db, user_id):
             return
 
@@ -725,6 +764,7 @@ async def cmd_reject_proposal(update: Update, context: ContextTypes.DEFAULT_TYPE
         return await update.message.reply_text("💁‍♀️ Formatnya: <code>/reject_proposal [proposer_id]</code> ya Kak!", parse_mode="HTML")
 
     async with get_db_connection() as db:
+        await ensure_proposals_table(db)
         if not await ensure_user_registered(update, db, user_id):
             return
 
@@ -746,6 +786,7 @@ async def cmd_reject_proposal(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def cmd_proposals_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     async with get_db_connection() as db:
+        await ensure_proposals_table(db)
         if not await ensure_user_registered(update, db, user_id):
             return
 
@@ -2059,7 +2100,6 @@ def build_app():
     return app
 
 def main():
-    # PERBAIKAN: Memastikan database terinisialisasi sebelum polling bot berjalan[cite: 2]
     asyncio.run(init_lineage_db())
     app = build_app()
     print("🧬 Telegram Cosa Nostra Lineage Bot Running...")
