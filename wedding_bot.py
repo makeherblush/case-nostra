@@ -5,6 +5,8 @@ import asyncio
 import logging
 import sqlite3
 import aiosqlite
+import io
+from PIL import Image
 from datetime import datetime, timezone, timedelta
 from contextlib import asynccontextmanager
 from telegram import (
@@ -48,6 +50,9 @@ PAKET_PRICING = {
     "platinum": 2500000
 }
 
+# Nama file frame yang ditaruh di GitHub
+FRAME_FILENAME = "photobooth_frame.png"
+
 # ==========================================
 # HELPER KONEKSI DATABASE
 # ==========================================
@@ -66,7 +71,6 @@ async def get_db_connection():
 # ==========================================
 async def init_wedding_db():
     async with get_db_connection() as db:
-        # Tabel Pengguna
         await db.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 user_id INTEGER PRIMARY KEY,
@@ -78,7 +82,6 @@ async def init_wedding_db():
             )
         """)
 
-        # Tabel Log Transaksi Koin
         await db.execute("""
             CREATE TABLE IF NOT EXISTS koin_transactions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -90,7 +93,6 @@ async def init_wedding_db():
             )
         """)
         
-        # Tabel Events
         await db.execute("""
             CREATE TABLE IF NOT EXISTS events (
                 event_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -117,7 +119,6 @@ async def init_wedding_db():
             )
         """)
 
-        # Tabel RSVP
         await db.execute("""
             CREATE TABLE IF NOT EXISTS rsvp (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -131,7 +132,6 @@ async def init_wedding_db():
             )
         """)
 
-        # Tabel Angpao / Donasi
         await db.execute("""
             CREATE TABLE IF NOT EXISTS angpao (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -146,7 +146,6 @@ async def init_wedding_db():
             )
         """)
 
-        # Tabel Klaim
         await db.execute("""
             CREATE TABLE IF NOT EXISTS claims (
                 claim_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -162,7 +161,6 @@ async def init_wedding_db():
             )
         """)
 
-        # Tabel Song Requests
         await db.execute("""
             CREATE TABLE IF NOT EXISTS song_requests (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -175,7 +173,6 @@ async def init_wedding_db():
             )
         """)
 
-        # Tabel Photo Gallery (Photobooth)
         await db.execute("""
             CREATE TABLE IF NOT EXISTS photo_gallery (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -214,15 +211,15 @@ async def log_koin_transaction(db, user_id: int, amount: int, tipe: str, keteran
         (user_id, amount, tipe, keterangan, now)
     )
 
-async def send_to_channel(context: ContextTypes.DEFAULT_TYPE, text: str = None, photo_file_id: str = None, reply_markup=None):
-    """Mengirim pesan atau gambar ke Channel Telegram utama."""
+async def send_to_channel(context: ContextTypes.DEFAULT_TYPE, text: str = None, photo_data=None, reply_markup=None):
+    """Mengirim pesan atau file gambar ke Channel Telegram."""
     if not CHANNEL_ID:
         return None
     try:
-        if photo_file_id:
+        if photo_data:
             msg = await context.bot.send_photo(
                 chat_id=CHANNEL_ID,
-                photo=photo_file_id,
+                photo=photo_data,
                 caption=text,
                 parse_mode="HTML",
                 reply_markup=reply_markup
@@ -234,7 +231,7 @@ async def send_to_channel(context: ContextTypes.DEFAULT_TYPE, text: str = None, 
                 parse_mode="HTML",
                 reply_markup=reply_markup
             )
-        return msg.message_id
+        return msg
     except Exception as e:
         logger.error(f"Gagal mengirim media/pesan ke channel {CHANNEL_ID}: {e}")
         return None
@@ -294,7 +291,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = update.effective_user.username or update.effective_user.first_name
     now = int(time.time())
 
-    # Clear state saat membuka menu utama
     context.user_data.clear()
 
     async with get_db_connection() as db:
@@ -325,7 +321,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id
     username = query.from_user.username or query.from_user.first_name
 
-    # Reset input state jika berpindah menu
     if not data.startswith("act_"):
         context.user_data['state'] = None
 
@@ -498,13 +493,13 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(f"✅ Narasi MC telah disiarkan ke {CHANNEL_ID}:\n\n{msg_text}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Kembali", callback_data="ven_mc_select")]]), parse_mode="HTML")
 
     # ----------------------------------------------------
-    # MENU PHOTOBOOTH (FIXED & IMPROVED IMAGE UPLOAD)
+    # MENU PHOTOBOOTH
     # ----------------------------------------------------
     elif data == "menu_photobooth":
         text = (
             "📸 <b>DIGITAL PHOTOBOOTH & GALLERY CHANNEL</b>\n"
             "──────────────────────────\n"
-            "Unggah foto gaya/pose pesta Anda! Foto akan secara otomatis dipublikasikan langsung ke channel <b>@RoyalWeddingRP</b>."
+            "Unggah foto gaya/pose pesta Anda! Foto akan otomatis **dipasangkan Frame Khusus** dan dipublikasikan langsung ke channel <b>@RoyalWeddingRP</b>."
         )
         keyboard = [
             [InlineKeyboardButton("📷 Upload Foto Sekarang", callback_data="act_upload_photo")],
@@ -518,7 +513,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = (
             "📸 <b>UPLOAD FOTO PHOTOBOOTH</b>\n\n"
             "Silakan <b>KIRIMKAN GAMBAR/FOTO</b> Anda ke chat bot ini sekarang!\n"
-            "<i>(Anda juga bisa memberikan caption/ucapan pada foto yang dikirimkan)</i>"
+            "<i>(Sistem akan otomatis menempelkan Frame Photobooth)</i>"
         )
         keyboard = [[InlineKeyboardButton("❌ Batal", callback_data="menu_photobooth")]]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
@@ -540,7 +535,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
     # ----------------------------------------------------
-    # MENU ANGPAO & DONASI (AUTO SEND CHANNEL)
+    # MENU ANGPAO & DONASI
     # ----------------------------------------------------
     elif data == "menu_angpao":
         text = (
@@ -864,33 +859,66 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("🔄 Data event & registrasi telah berhasil di-reset.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Kembali", callback_data="menu_admin")]]))
 
 # ==========================================
-# MESSAGE HANDLERS (TEXT & PHOTO INPUTS)
+# MESSAGE HANDLERS (PHOTOBOOTH WITH PIL FRAME)
 # ==========================================
 async def handle_photo_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Menangani pengiriman foto untuk Photobooth & posting otomatis ke Channel."""
+    """Menangani upload foto, menempelkan frame PNG dari GitHub, dan posting ke Channel."""
     state = context.user_data.get('state')
     user_id = update.effective_user.id
     username = update.effective_user.username or update.effective_user.first_name
     caption = update.message.caption or "Pose Cantik di Resepsi Wedding RP ✨"
     now = int(time.time())
 
-    # Ambil file_id dari foto resolusi tertinggi
-    photo_file_id = update.message.photo[-1].file_id
+    # Send status 'typing' / 'uploading photo'
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
 
-    # Kirim Gambar & Caption Langsung ke Channel Telegram
-    channel_text = f"📸 <b>PHOTOBOOTH FEED (@RoyalWeddingRP)</b>\n👤 Tamu: <b>@{username}</b>\n💬 <i>\"{caption}\"</i>"
-    ch_msg_id = await send_to_channel(context, text=channel_text, photo_file_id=photo_file_id)
+    try:
+        # 1. Unduh foto dari Telegram User
+        photo_file = await update.message.photo[-1].get_file()
+        photo_bytes = await photo_file.download_as_bytearray()
+        user_img = Image.open(io.BytesIO(photo_bytes)).convert("RGBA")
 
+        # 2. Cek ketersediaan file Frame PNG dari repo GitHub
+        frame_path = os.path.join(BASE_DIR, FRAME_FILENAME)
+
+        if os.path.exists(frame_path):
+            frame_img = Image.open(frame_path).convert("RGBA")
+            # Resize foto user agar presisi menyesuaikan resolusi frame
+            user_img = user_img.resize(frame_img.size)
+            # Tempelkan overlay frame PNG
+            combined_img = Image.alpha_composite(user_img, frame_img)
+        else:
+            logger.warning(f"File frame '{FRAME_FILENAME}' tidak ditemukan di lokasi {frame_path}. Menggunakan foto asli.")
+            combined_img = user_img
+
+        # 3. Export gambar hasil gabungan ke ByteStream
+        output_buffer = io.BytesIO()
+        combined_img.convert("RGB").save(output_buffer, format="JPEG", quality=95)
+        output_buffer.seek(0)
+
+        # 4. Kirim Foto Ber-frame ke Channel Telegram
+        channel_text = f"📸 <b>PHOTOBOOTH FEED (@RoyalWeddingRP)</b>\n👤 Tamu: <b>@{username}</b>\n💬 <i>\"{caption}\"</i>"
+        ch_msg = await send_to_channel(context, text=channel_text, photo_data=output_buffer)
+        
+        ch_msg_id = ch_msg.message_id if ch_msg else None
+        final_file_id = ch_msg.photo[-1].file_id if ch_msg else update.message.photo[-1].file_id
+
+    except Exception as e:
+        logger.error(f"Gagal memproses frame photobooth: {e}")
+        ch_msg_id = None
+        final_file_id = update.message.photo[-1].file_id
+
+    # 5. Simpan ke database
     async with get_db_connection() as db:
         await db.execute(
             "INSERT INTO photo_gallery (event_id, user_id, username, file_id, caption, channel_msg_id, created_at) VALUES (1, ?, ?, ?, ?, ?, ?)",
-            (user_id, username, photo_file_id, caption, ch_msg_id, now)
+            (user_id, username, final_file_id, caption, ch_msg_id, now)
         )
         await db.commit()
 
     context.user_data['state'] = None
     await update.message.reply_text(
-        f"📸 <b>FOTO PHOTOBOOTH BERHASIL DIUNGGAH!</b>\n\nFoto Anda telah dipublikasikan secara otomatis ke channel <b>{CHANNEL_ID}</b>.",
+        f"📸 <b>FOTO PHOTOBOOTH BER-FRAME BERHASIL DIUNGGAH!</b>\n\nFoto Anda telah dipasangkan frame dan dipublikasikan ke channel <b>{CHANNEL_ID}</b>.",
         reply_markup=InlineKeyboardMarkup([[btn_back()]]),
         parse_mode="HTML"
     )
@@ -929,7 +957,6 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         est_num = int(est_tamu) if est_tamu.isdigit() else 100
 
-        # Broadcast Pengumuman Event ke Channel
         ch_text = (
             f"📢 <b>NEW WEDDING EVENT REGISTERED!</b>\n"
             "──────────────────────────\n"
@@ -942,7 +969,8 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "──────────────────────────\n"
             "<i>Konfirmasi kehadiran Anda melalui tombol RSVP di bot!</i>"
         )
-        ch_id = await send_to_channel(context, text=ch_text)
+        ch_msg = await send_to_channel(context, text=ch_text)
+        ch_id = ch_msg.message_id if ch_msg else None
 
         async with get_db_connection() as db:
             await db.execute(
@@ -974,11 +1002,9 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 context.user_data['state'] = None
                 return await update.message.reply_text("❌ Saldo Koin Anda tidak mencukupi untuk memberikan angpao ini.")
 
-            # Potong Saldo Koin
             await db.execute("UPDATE users SET koin = koin - ? WHERE user_id = ?", (amount, user_id))
             await log_koin_transaction(db, user_id, -amount, "ANGPAO_GIVE", f"Kirim Angpao {amount} Koin")
 
-            # Disiarkan ke Channel
             ch_text = (
                 f"🎁 <b>ANGPAO & WISHING BROADCAST</b>\n"
                 "──────────────────────────\n"
@@ -986,7 +1012,8 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"💰 <b>Nominal:</b> {amount:,} Koin\n"
                 f"🕊️ <b>Doa Restu:</b> <i>\"{pesan}\"</i>"
             )
-            ch_msg_id = await send_to_channel(context, text=ch_text)
+            ch_msg = await send_to_channel(context, text=ch_text)
+            ch_msg_id = ch_msg.message_id if ch_msg else None
 
             await db.execute(
                 "INSERT INTO angpao (event_id, from_user_id, from_username, tipe, jumlah_koin, pesan, channel_msg_id, created_at) VALUES (1, ?, ?, 'Angpao', ?, ?, ?, ?)",
@@ -1082,13 +1109,10 @@ def build_app():
     app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
     app.add_error_handler(global_error_handler)
 
-    # Command Handler Utama untuk Membuka Menu
     app.add_handler(CommandHandler("start", start))
-
-    # Callback Query Router (Interaksi Tombol Keyboard)
     app.add_handler(CallbackQueryHandler(callback_handler))
 
-    # Media & Text Handlers untuk Menerima Input Stateful Pengguna
+    # Handlers Foto dan Teks Input
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo_input))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_input))
 
@@ -1097,7 +1121,7 @@ def build_app():
 def main():
     asyncio.run(init_wedding_db())
     app = build_app()
-    print("🤖 Bot Wedding Organizer & Event RP (@RoyalWeddingRP Linked) Running Successfully...")
+    print("🤖 Bot Wedding Organizer & Event RP Running Successfully...")
     app.run_polling()
 
 if __name__ == "__main__":
