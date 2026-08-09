@@ -44,11 +44,11 @@ PROPOSAL_TTL_SECONDS = 10 * 60          # lamaran hangus setelah 10 menit
 MAX_PROPOSALS_PER_DAY = 3               # anti-spam harass ke banyak target
 PROPOSAL_EXPIRY_CHECK_INTERVAL = 60     # background loop cek tiap 60 detik
 
-# State untuk ConversationHandler Register KTP
-REG_NAMA, REG_MUSE, REG_UMUR, REG_TGLLAHIR = range(4)
+# State untuk ConversationHandler Register KTP (Ditambahkan REG_CONFIRM)
+REG_NAMA, REG_UMUR, REG_MUSE, REG_TGLLAHIR, REG_CONFIRM = range(5)
 
 # State untuk ConversationHandler Admin Edit KTP
-ADMIN_EDIT_CHOICE, ADMIN_EDIT_VALUE = range(4, 6)
+ADMIN_EDIT_CHOICE, ADMIN_EDIT_VALUE = range(5, 7)
 
 (
     STATE_PROPOSE_TARGET,
@@ -85,7 +85,7 @@ ADMIN_EDIT_CHOICE, ADMIN_EDIT_VALUE = range(4, 6)
     STATE_ADMIN_APPROVE_ACTION_ID,
     STATE_ADMIN_CHEAT_LOYALTY_TARGET,
     STATE_ADMIN_CHEAT_LOYALTY_SCORE
-) = range(6, 40)
+) = range(7, 41)
 
 BLACKLISTED_FAMILY_NAMES = {
     "ADMIN", "ADMINISTRATOR", "OFFICIAL", "SYSTEM", "MOD", "MODERATOR",
@@ -522,7 +522,7 @@ async def is_relative(db, user_a_id: int, user_b_id: int) -> bool:
     return False
 
 # ==========================================
-# CONVERSATION HANDLER: REGISTRATION KTP
+# CONVERSATION HANDLER: REGISTRATION KTP (MODIFIED WITH CONFIRMATION)
 # ==========================================
 async def reg_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -557,18 +557,8 @@ async def reg_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def reg_nama(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['nama_lengkap'] = update.message.text.strip()
     await update.message.reply_text(
-        "🎭 <b>NAMA MUSE / AVATAR:</b>\n\n"
-        "<b>2. Masukkan nama Muse / Face Claim (FC) yang digunakan:</b>\n"
-        "<i>(Contoh: Character Alpha / Original Concept)</i>",
-        parse_mode="HTML"
-    )
-    return REG_MUSE
-
-async def reg_muse(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['muse'] = update.message.text.strip()
-    await update.message.reply_text(
         "🎂 <b>USIA OPERASIONAL:</b>\n\n"
-        "<b>3. Masukkan umur karakter Anda (Format Angka):</b>\n"
+        "<b>2. Masukkan umur karakter Anda (Format Angka):</b>\n"
         "<i>(Contoh: 28)</i>",
         parse_mode="HTML"
     )
@@ -582,6 +572,16 @@ async def reg_umur(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     context.user_data['umur'] = int(text)
     await update.message.reply_text(
+        "🎭 <b>NAMA MUSE / AVATAR:</b>\n\n"
+        "<b>3. Masukkan nama Muse / Face Claim (FC) yang digunakan:</b>\n"
+        "<i>(Contoh: Character Alpha / Original Concept)</i>",
+        parse_mode="HTML"
+    )
+    return REG_MUSE
+
+async def reg_muse(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['muse'] = update.message.text.strip()
+    await update.message.reply_text(
         "📅 <b>TANGGAL LAHIR:</b>\n\n"
         "<b>4. Masukkan tanggal lahir karakter Anda:</b>\n"
         "<i>(Format: DD-MM-YYYY, Contoh: 15-08-1996)</i>",
@@ -590,18 +590,50 @@ async def reg_umur(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return REG_TGLLAHIR
 
 async def reg_tgl_lahir(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['tanggal_lahir'] = update.message.text.strip()
+
+    nama = context.user_data.get('nama_lengkap', 'Warga Anonim')
+    umur = context.user_data.get('umur', 18)
+    muse = context.user_data.get('muse', 'Tidak Ada')
+    tgl = context.user_data.get('tanggal_lahir', '01-01-2000')
+
+    summary_text = (
+        "📋 <b>KONFIRMASI DATA REGISTRASI KTP</b>\n\n"
+        "Mohon periksa kembali data pendaftaran Anda sebelum disimpan:\n\n"
+        f"👤 <b>Nama Lengkap :</b> {nama}\n"
+        f"🎂 <b>Usia         :</b> {umur} Tahun\n"
+        f"🎭 <b>Muse / Avatar :</b> {muse}\n"
+        f"📅 <b>Tgl Lahir    :</b> {tgl}\n\n"
+        "Apakah data di atas sudah benar?"
+    )
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Ya, Sudah Benar", callback_data="reg_confirm_yes")],
+        [
+            InlineKeyboardButton("🔄 Ulangi Registrasi", callback_data="reg_confirm_retry"),
+            InlineKeyboardButton("❌ Batal", callback_data="reg_cancel")
+        ]
+    ])
+
+    await update.message.reply_text(summary_text, reply_markup=keyboard, parse_mode="HTML")
+    return REG_CONFIRM
+
+async def reg_confirm_yes(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
     user_id = update.effective_user.id
     username = update.effective_user.username or update.effective_user.first_name
 
     nama = context.user_data.get('nama_lengkap', 'Warga Anonim')
-    muse = context.user_data.get('muse', 'Tidak Ada')
     umur = context.user_data.get('umur', 18)
-    tgl = update.message.text.strip()
+    muse = context.user_data.get('muse', 'Tidak Ada')
+    tgl = context.user_data.get('tanggal_lahir', '01-01-2000')
     status_sipil = "Lajang"
 
     async with get_db_connection() as db:
         await ensure_all_tables_exist(db)
-        
+
         async with db.execute("SELECT gelar_tier FROM users WHERE user_id = ?", (user_id,)) as cursor:
             row = await cursor.fetchone()
             gelar = row[0] if row and row[0] else 'G0 (Warga Sipil)'
@@ -617,26 +649,26 @@ async def reg_tgl_lahir(update: Update, context: ContextTypes.DEFAULT_TYPE):
         net_worth, koin, bank, vault = await calculate_net_worth(db, user_id)
 
     ktp_card = (
+        "🎉 <b>REGISTRASI BERHASIL! DOKUMEN CITIZEN DITERBITKAN</b>\n\n"
         "🪪 <b>KARTU TANDA PENDUKUK (KTP) DIGITAL</b>\n"
         "🏛️ <b>KOTA COSA NOSTRA NETWORK</b>\n\n"
         f"👤 <b>Nama Lengkap :</b> {nama}\n"
-        f"🎭 <b>Muse / Avatar :</b> {muse}\n"
         f"🎂 <b>Usia         :</b> {umur} Tahun\n"
+        f"🎭 <b>Muse / Avatar :</b> {muse}\n"
         f"📅 <b>Tgl Lahir    :</b> {tgl}\n"
         f"💍 <b>Status Sipil :</b> {status_sipil}\n"
         f"💼 <b>Gelar / Rank :</b> {gelar}\n\n"
         f"💳 <b>ID Citizen   :</b> <code>{user_id}</code>\n"
         f"💵 <b>Modal Tunai   :</b> {koin:,} Koin\n"
         f"💎 <b>Net Worth    :</b> {net_worth:,} Koin\n\n"
-        "🎉 <i>Registrasi Berhasil! Dokumen sipil Anda resmi aktif dengan status LAJANG.\n"
-        "⚠️ <b>Perhatian:</b> Perubahan data identitas dikontrol ketat oleh Dewan Administrator.</i>"
+        "✨ <i>Dokumen sipil Anda resmi aktif. Anda sekarang dapat memeriksa KTP kapan saja dengan perintah /ktp atau memilih menu <b>🪪 Cek KTP Saya</b> di bot!</i>"
     )
 
-    await update.message.reply_text(ktp_card, reply_markup=get_back_button(), parse_mode="HTML")
+    await query.edit_message_text(ktp_card, reply_markup=get_back_button(), parse_mode="HTML")
     return ConversationHandler.END
 
 async def reg_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = "❌ Proses dibatalkan."
+    msg = "❌ Proses pendaftaran dibatalkan."
     if update.callback_query:
         await update.callback_query.edit_message_text(msg, reply_markup=get_back_button())
     else:
@@ -1651,7 +1683,7 @@ async def start_interactive_prompt(update: Update, context: ContextTypes.DEFAULT
         return STATE_TRANSFER_HEAD_TARGET
 
     elif data == "prompt_kick_member":
-        await query.edit_message_text("i👞 <b>MENGELUARKAN ANGGOTA KELUARGA</b>\n\nMasukkan Telegram User ID anggota yang ingin dikeluarkan:", parse_mode="HTML")
+        await query.edit_message_text("ii👞 <b>MENGELUARKAN ANGGOTA KELUARGA</b>\n\nMasukkan Telegram User ID anggota yang ingin dikeluarkan:", parse_mode="HTML")
         return STATE_KICK_MEMBER_TARGET
 
     elif data == "prompt_will":
@@ -2874,7 +2906,7 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
             [InlineKeyboardButton("🕯️ Tunjuk Godparent", callback_data="prompt_godparent"), InlineKeyboardButton("❌ Pencabutan Godparent", callback_data="prompt_revoke_godparent")],
             [InlineKeyboardButton("📥 Deposit Vault", callback_data="prompt_deposit_vault"), InlineKeyboardButton("📤 Withdraw Vault", callback_data="prompt_withdraw_vault")],
             [InlineKeyboardButton("📊 Set Pajak", callback_data="prompt_set_tax"), InlineKeyboardButton("👑 Transfer Head", callback_data="prompt_transfer_head")],
-            [InlineKeyboardButton("👞 Kick Anggota", callback_data="prompt_kick_member")],
+            [InlineKeyboardButton("i👞 Kick Anggota", callback_data="prompt_kick_member")],
             [InlineKeyboardButton("🚪 Keluar Keluarga", callback_data="action_leave_family"), InlineKeyboardButton("🗡️ Membelot (Betray)", callback_data="action_betray")],
             [InlineKeyboardButton("◀️ Kembali ke Portal Utama", callback_data="menu_main")]
         ]
@@ -3038,7 +3070,7 @@ def build_app():
 
     app.add_error_handler(global_error_handler)
 
-    # Registration Conversation Handler
+    # Registration Conversation Handler (Updated States & Callbacks)
     reg_conv = ConversationHandler(
         entry_points=[
             CommandHandler("register", reg_start),
@@ -3046,9 +3078,14 @@ def build_app():
         ],
         states={
             REG_NAMA: [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_nama)],
-            REG_MUSE: [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_muse)],
             REG_UMUR: [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_umur)],
-            REG_TGLLAHIR: [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_tgl_lahir)]
+            REG_MUSE: [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_muse)],
+            REG_TGLLAHIR: [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_tgl_lahir)],
+            REG_CONFIRM: [
+                CallbackQueryHandler(reg_confirm_yes, pattern="^reg_confirm_yes$"),
+                CallbackQueryHandler(reg_start, pattern="^reg_confirm_retry$"),
+                CallbackQueryHandler(reg_cancel, pattern="^reg_cancel$")
+            ]
         },
         fallbacks=[CommandHandler("cancel", reg_cancel), CallbackQueryHandler(reg_cancel, pattern="^reg_cancel$")]
     )
@@ -3112,7 +3149,7 @@ def build_app():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(menu_callback_handler, pattern="^(menu_|action_|accept_prop_|reject_prop_)"))
 
-    # Legacy Command Handlers (tetap tersedia agar tidak mengurangi fitur apa pun)
+    # Legacy Command Handlers
     app.add_handler(CommandHandler("ktp", cmd_ktp))
     app.add_handler(CommandHandler("networth", cmd_networth))
     app.add_handler(CommandHandler("kekayaan", cmd_networth))
