@@ -55,10 +55,6 @@ RANK_TITLES = {
 # ==========================================
 @asynccontextmanager
 async def get_db_connection():
-    """
-    Membuka koneksi SQLite dengan konfigurasi WAL (Write-Ahead Logging) 
-    menggunakan async context manager agar multi-process/bot aman membaca & menulis.
-    """
     db = await aiosqlite.connect(DB_NAME, timeout=30.0)
     try:
         await db.execute("PRAGMA journal_mode=WAL;")
@@ -98,10 +94,6 @@ def parse_target_id(context) -> int | None:
     return int(context.args[0])
 
 async def sync_gelar_from_assets(db, user_id: int) -> str:
-    """
-    Mengecek inventaris user di tabel assets secara otomatis.
-    Jika user memiliki item gelar (seperti CSN-GLR-...), update kolom gelar_tier di tabel users.
-    """
     try:
         async with db.execute(
             """SELECT item_code, item_name FROM assets 
@@ -133,7 +125,6 @@ async def sync_gelar_from_assets(db, user_id: int) -> str:
         return res[0] if res else "G0"
 
 async def get_or_create_user(db, user_id: int, username: str):
-    """Fungsi standar untuk mengambil atau membuat data user secara konsisten berdasarkan user_id."""
     await db.execute("""
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
@@ -204,10 +195,9 @@ async def get_or_create_user(db, user_id: int, username: str):
             return await cursor.fetchone()
 
 # ==========================================
-# MATRIX JOB (MAFIA & POLICE INTRIQUE)
+# MATRIX JOB & CRIMES
 # ==========================================
 JOBS = {
-    # MAFIA OPERATIONAL JOBS
     "debt": {"name": "Debt Collector", "tier": "G1", "category": "mafia", "dur": 3600, "vit": 15, "min": 400, "max": 800, "desc": "Kumpulin utang dari debitur lokal"},
     "smuggle_s": {"name": "Small Smuggling", "tier": "G1", "category": "mafia", "dur": 7200, "vit": 20, "min": 1000, "max": 2000, "desc": "Selundupkan barang kecil"},
     "pickpocket": {"name": "Pickpocket", "tier": "G1", "category": "mafia", "dur": 3600, "vit": 10, "min": 500, "max": 1200, "desc": "Curi dompet warga"},
@@ -233,7 +223,6 @@ JOBS = {
     "topple": {"name": "Topple Government", "tier": "G6", "category": "mafia", "dur": 43200, "vit": 60, "min": 60000, "max": 120000, "desc": "Gulingkan rezim pemerintahan"},
     "ultimate": {"name": "Ultimate World Domination", "tier": "G7", "category": "mafia", "dur": 108000, "vit": 80, "min": 200000, "max": 400000, "desc": "Kuasai tatanan dunia baru"},
 
-    # POLICE & POLICE INFILTRATION JOBS (INTRIK POLISI & MAFIA)
     "patrol": {"name": "Rondaan Patroli Kota", "tier": "G0", "category": "police", "dur": 3600, "vit": 10, "min": 600, "max": 1200, "desc": "Patroli ketertiban jalanan umum"},
     "cop_bribe": {"name": "Polisi Terlibat Suap (Korupsi)", "tier": "G1", "category": "police", "dur": 7200, "vit": 15, "min": 1500, "max": 3500, "desc": "Terima uang damai dari bos kriminal jalanan"},
     "undercover": {"name": "Penyusupan Intel Undercover", "tier": "G2", "category": "police", "dur": 10800, "vit": 25, "min": 3000, "max": 7000, "desc": "Menyamar sebagai anggota sindikat Cosa Nostra"},
@@ -343,6 +332,9 @@ def get_main_menu_keyboard():
         ],
         [
             InlineKeyboardButton("🏴‍☠️ Organisasi Crew", callback_data="opmenu_crew"),
+            InlineKeyboardButton("📖 Kamus Istilah Game", callback_data="opmenu_dictionary")
+        ],
+        [
             InlineKeyboardButton("🛠️ Operations Admin", callback_data="opmenu_admin")
         ]
     ]
@@ -362,8 +354,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "⚔️ <b>SELAMAT DATANG DI PUSAT OPERASIONAL COSA NOSTRA</b>\n"
         "──────────────────────────────────────────\n"
         "<i>\"Loyalty, Strategy, and Supreme Command in Every Operation.\"</i>\n\n"
-        "Selamat datang di Portal Komando Utama Operasional Cosa Nostra Network. Kami siap memfasilitasi dan mengarahkan seluruh aktivitas penugasan taktis, eksekusi misi strategis bertingkat, karir penegakan hukum publik, penyamaran intelijen, laporan jurnalisme, kebijakan amnesti politisi, pengelolaan skuadron Crew, serta pengawasan status hukum anggota secara profesional dan aman.\n\n"
-        "Silakan pilih kategori operasional yang ingin Anda akses melalui opsi di bawah ini:"
+        "Selamat datang di Portal Komando Utama Operasional Cosa Nostra Network. Bot ini didesain 100% ramah pemula, kamu bisa menjelajah seluruh sistem hanya dengan menekan tombol navigasi di bawah ini.\n\n"
+        "💡 <b>PANDUAN MULAI UNTUK PEMULA:</b>\n"
+        "1. Klik tombol <b>👤 Profil & Status</b> untuk mengklaim modal koin harian pertamamu.\n"
+        "2. Kumpulkan uang tunai dengan memilih menu <b>🔨 Pekerjaan & Misi</b>.\n"
+        "3. Bingung dengan istilah di game ini? Tekan tombol <b>📖 Kamus Istilah Game</b> di bawah.\n\n"
+        "Silakan pilih kategori operasional yang ingin kamu buka:"
     )
     if update.callback_query:
         query = update.callback_query
@@ -382,53 +378,108 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
 
     elif data == "opmenu_profile":
         text = (
-            "👤 <b>SUB-MENU PROFIL & STATUS ANGGOTA</b>\n\n"
-            "• <code>/rekening</code> — Status Profil, Koin, Respect & Status Hukum\n"
-            "• <code>/bribe [jumlah]</code> — Suap petugas untuk kurangi masa tahanan/Heat\n"
-            "• <code>/daily</code> — Klaim tunjangan operasional harian gratis"
+            "👤 <b>PUSAT KELOLA PROFIL & STATUS ANGGOTA</b>\n"
+            "──────────────────────────────────────────\n"
+            "Menu ini membantumu memantau kondisi fisik, dompet, dan status hukum karaktermu secara lengkap.\n\n"
+            "<b>Penjelasan Detail Sub-Fitur:</b>\n"
+            "• <b>Cek Rekening & Profil:</b> Melihat data KTP-mu, sisa koin tunai, tabungan aman di bank, stamina, dan apakah kamu sedang bebas atau ditahan polisi.\n"
+            "• <b>Klaim Tunjangan Harian:</b> Mengambil jatah koin gratis sebesar 2.000 koin setiap 24 jam sekali sebagai modal awal bermain.\n"
+            "• <b>Suap Petugas (Bribe):</b> Membayar uang damai/suap kepada aparat. Jika kamu punya status buron (Heat) atau terlanjur mendekam di penjara, fitur ini akan membebaskanmu seketika.\n\n"
+            "<i>Tekan tombol di bawah untuk memilih aksi:</i>"
         )
-        await query.edit_message_text(text, reply_markup=get_back_button(), parse_mode="HTML")
+        keyboard = [
+            [InlineKeyboardButton("💵 Cek Rekening & Profil Saya", callback_data="opaction_rekening_exec")],
+            [InlineKeyboardButton("🎁 Klaim Tunjangan Harian Gratis", callback_data="opaction_daily_exec")],
+            [InlineKeyboardButton("💵 Suap Petugas (Bebaskan Heat/Penjara)", callback_data="opaction_bribe_exec")],
+            [InlineKeyboardButton("◀️ Kembali ke Menu Utama", callback_data="opmenu_main")]
+        ]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
     elif data == "opmenu_jobs":
         text = (
-            "🔨 <b>SUB-MENU PEKERJAAN & MISI INTRIK POLISI-MAFIA</b>\n\n"
-            "• <code>/work</code> — Kerjakan penugasan harian rutin\n"
-            "• <code>/job</code> — Cek seluruh opsi misi Mafia & Intrik Polisi\n"
-            "• <code>/job [kode_job]</code> — Jalankan penugasan atau misi penyamaran\n"
-            "• <code>/crime</code> — Cek daftar opsi kejahatan berisiko\n"
-            "• <code>/crime [kode_crime]</code> — Eksekusi aksi kejahatan lapangan"
+            "🔨 <b>PUSAT PEKERJAAN & MISI INTRIK</b>\n"
+            "──────────────────────────────────────────\n"
+            "Di sinilah tempat utama kamu mencari koin tunai untuk memperkaya karaktermu.\n\n"
+            "<b>Penjelasan Detail Sub-Fitur:</b>\n"
+            "• <b>Bekerja Harian:</b> Bekerja rutin setiap 1 jam sekali. Setiap kali bekerja, staminamu berkurang 15%. Semakin tinggi pangkat mafiamu (G1-G7), gajimu akan makin besar.\n"
+            "• <b>Misi Job Bertingkat:</b> Menjalankan penugasan strategis (seperti penagih utang, perampokan bank, atau penyusupan intel). Misi ini butuh waktu tunggu beberapa jam, tetapi menghasilkan koin sangat besar.\n"
+            "• <b>Aksi Kejahatan Jalanan:</b> Melakukan aksi kejahatan instan seperti mencopet atau mencuri mobil. Hasilnya langsung keluar detik itu juga, namun ada risiko tertangkap polisi dan masuk penjara jika gagal.\n\n"
+            "<i>Tekan tombol di bawah untuk mulai beraksi:</i>"
         )
-        await query.edit_message_text(text, reply_markup=get_back_button(), parse_mode="HTML")
+        keyboard = [
+            [InlineKeyboardButton("🔨 Bekerja Sekarang (Kerja Harian)", callback_data="opaction_work_exec")],
+            [InlineKeyboardButton("💼 Lihat & Jalankan Misi Job", callback_data="opaction_job_view")],
+            [InlineKeyboardButton("🕵️ Lihat & Eksekusi Aksi Kejahatan", callback_data="opaction_crime_view")],
+            [InlineKeyboardButton("◀️ Kembali ke Menu Utama", callback_data="opmenu_main")]
+        ]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
     elif data == "opmenu_career":
         text = (
-            "💼 <b>SUB-MENU KARIR & PROFESI PUBLIK</b>\n\n"
-            "• <code>/career</code> — Cek status karir & opsi beralih profesi\n"
-            "• <code>/badge</code> — Cek progres lencana pangkat profesi\n"
-            "• <code>/patrol</code> — Patroli otomatis khusus Kepolisian (Police)\n"
-            "• <code>/arrest [user_id]</code> — Penangkapan manual buronan (Police)\n"
-            "• <code>/bail [user_id]</code> — Bebaskan tahanan dengan jaminan (Lawyer)\n"
-            "• <code>/pardon [user_id]</code> — Grasi ampunan hapus Heat/Bounty (Judge)\n"
-            "• <code>/expose [user_id]</code> — Investigasi & rilis laporan finansial (Journalist)\n"
-            "• <code>/amnesty [user_id]</code> — Kebijakan amnesties pemotongan Heat (Politician)"
+            "💼 <b>PUSAT KARIR & PROFESI PUBLIK</b>\n"
+            "──────────────────────────────────────────\n"
+            "Jika kamu tidak memegang gelar mafia aktif (Gelar G0), kamu bisa bekerja di jalur pemerintahan atau penegak hukum publik.\n\n"
+            "<b>Penjelasan Detail 5 Jalur Profesi:</b>\n"
+            "1. <b>Police (Kepolisian):</b> Bertugas ronda dan menangkap pemain kriminal ber-Heat tinggi di jalanan.\n"
+            "2. <b>Lawyer (Pengacara):</b> Bertugas membayar jaminan untuk membebaskan pemain lain yang sedang dipenjara.\n"
+            "3. <b>Judge (Hakim):</b> Memiliki kekuasaan mengeluarkan vonis grasi untuk menghapus catatan kriminal pemain lain.\n"
+            "4. <b>Journalist (Jurnalis):</b> Membongkar dan mempublikasikan rahasia kekayaan serta catatan Heat pemain lain ke publik.\n"
+            "5. <b>Politician (Politisi):</b> Menerbitkan kebijakan diskon amnesties pemotongan tingkat buron.\n\n"
+            "<i>Tekan tombol di bawah untuk mengelola profesimu:</i>"
         )
-        await query.edit_message_text(text, reply_markup=get_back_button(), parse_mode="HTML")
+        keyboard = [
+            [InlineKeyboardButton("📋 Cek Profil Karir Saya", callback_data="opaction_career_exec")],
+            [InlineKeyboardButton("🎖️ Cek Lencana Pangkat", callback_data="opaction_badge_exec")],
+            [InlineKeyboardButton("🚔 Jalankan Patroli Polisi", callback_data="opaction_patrol_exec")],
+            [InlineKeyboardButton("◀️ Kembali ke Menu Utama", callback_data="opmenu_main")]
+        ]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
     elif data == "opmenu_targets":
         text = (
-            "🎯 <b>SUB-MENU TARGET & KONTRAK BURONAN</b>\n\n"
-            "• <code>/hit [user_id]</code> — Eksekusi target operasi secara langsung\n"
-            "• <code>/bounty [user_id] [koin]</code> — Pasang kontrak imbalan buronan\n"
-            "• <code>/wanted</code> — Lihat daftar buronan paling dicari"
+            "🎯 <b>PUSAT TARGET & KONTRAK BURONAN</b>\n"
+            "──────────────────────────────────────────\n"
+            "Menu interaksi dan pertempuran antar sesama pemain di dalam server.\n\n"
+            "<b>Penjelasan Detail Sub-Fitur:</b>\n"
+            "• <b>Daftar Buronan:</b> Melihat papan peringkat 10 pemain yang memiliki nilai sayembara (Bounty) tertinggi di kota.\n"
+            "• <b>Eksekusi Target (/hit):</b> Menyerang pemain lain. Jika menang, kamu akan merampas setengah uang tunai di dompetnya + mengklaim bointynya. Jika gagal, kamu yang akan masuk penjara.\n"
+            "• <b>Pasang Bounty (/bounty):</b> Menaruh hadiah koin atas kepala pemain lain agar dipburu dan diserang oleh pemain se-server.\n\n"
+            "<i>Tekan tombol di bawah untuk navigasi:</i>"
         )
-        await query.edit_message_text(text, reply_markup=get_back_button(), parse_mode="HTML")
+        keyboard = [
+            [InlineKeyboardButton("🚔 Lihat Daftar Buronan Aktif", callback_data="opaction_wanted_exec")],
+            [InlineKeyboardButton("◀️ Kembali ke Menu Utama", callback_data="opmenu_main")]
+        ]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
     elif data == "opmenu_crew":
         text = (
-            "🏴‍☠️ <b>SUB-MENU ORGANISASI CREW</b>\n\n"
-            "• <code>/crew</code> — Cek info status Crew kamu\n"
-            "• <code>/crew create [nama]</code> — Buat Crew baru (Biaya: 50.000 Koin)\n"
-            "• <code>/crew donate [jumlah]</code> — Setor donasi koin ke kas Crew"
+            "🏴‍☠️ <b>PUSAT ORGANISASI CREW (KELOMPOK)</b>\n"
+            "──────────────────────────────────────────\n"
+            "Sistem perkumpulan/Geng untuk bermain bersama teman-temanmu di Cosa Nostra.\n\n"
+            "<b>Penjelasan Detail Sub-Fitur:</b>\n"
+            "• <b>Info Crew:</b> Mengecek nama gengmu, nama ketua, total poin reputasi (Respect), dan saldo tabungan kas bersama.\n"
+            "• <b>Buat Crew:</b> Mendirikan organisasi geng baru dengan modal investasi 50.000 koin.\n"
+            "• <b>Donasi Kas:</b> Menyisihkan uang pribadi untuk disetor ke kas bersama (Treasury) agar gengmu makin kuat.\n\n"
+            "<i>Tekan tombol di bawah untuk melihat info crew:</i>"
+        )
+        keyboard = [
+            [InlineKeyboardButton("🏴‍☠️ Cek Info Crew Saya", callback_data="opaction_crew_exec")],
+            [InlineKeyboardButton("◀️ Kembali ke Menu Utama", callback_data="opmenu_main")]
+        ]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+
+    elif data == "opmenu_dictionary":
+        text = (
+            "📖 <b>KAMUS ISTILAH PENTING COSA NOSTRA</b>\n"
+            "──────────────────────────────────────────\n"
+            "Bingung dengan kata-kata di dalam game? Berikut penjelasannya:\n\n"
+            "💵 <b>Cash / Koin Tunai:</b> Uang yang sedang kamu pegang di dompet. Uang ini bisa hilang atau dirampok jika kamu diserang pemain lain.\n"
+            "🏦 <b>Tabungan Bank:</b> Uang yang kamu simpan aman di bank. Uang di bank tidak bisa dirampok oleh siapa pun.\n"
+            "⚡ <b>Vitality (Stamina):</b> Tenaga fisik karaktermu (0-100%). Jika di bawah 20%, kamu terlalu lelah untuk bekerja dan harus membeli makanan.\n"
+            "🔥 <b>Heat Level:</b> Tingkat buron kecurigaan polisi padamu. Semakin tinggi Heat, semakin mudah kamu tertangkap dan dijebloskan ke penjara.\n"
+            "🏆 <b>Respect:</b> Poin reputasi dan kehormatan karakter atau gengmu di dunia mafia.\n"
+            "🎯 <b>Bounty:</b> Uang hadiah/sayembara yang terpasang pada kepala seorang buronan."
         )
         await query.edit_message_text(text, reply_markup=get_back_button(), parse_mode="HTML")
 
@@ -444,21 +495,53 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
                 )
 
             text = (
-                f"🛠️ <b>OPERATIONS ADMIN PANEL</b>\n\n"
+                f"🛠️ <b>OPERATIONS ADMIN PANEL & MODERASI</b>\n"
+                f"──────────────────────────────────────────\n"
                 f"Level Otoritas Anda: <b>Tier {tier}</b>\n\n"
-                f"<b>Fitur Pengawasan Admin:</b>\n"
-                f"• <code>/cek_rekening [target_id]</code> (Tier 1+)\n"
-                f"• <code>/audit_ops [target_id]</code> (Tier 1+)\n\n"
-                f"<b>Fitur Admin Operasional:</b>\n"
-                f"• <code>/jail_user [user_id] [jam]</code> (Tier 1+)\n"
-                f"• <code>/unjail_user [user_id]</code> (Tier 2+)\n"
-                f"• <code>/clear_heat [user_id]</code> (Tier 3+)\n\n"
-                f"<b>Fitur Cheat Admin:</b>\n"
-                f"• <code>/cheat_godmode [target_id]</code> (Tier 1+)\n"
-                f"• <code>/cheat_instant_work [target_id]</code> (Tier 1+)\n"
-                f"• <code>/cheat_clear_bounty [target_id]</code> (Tier 1+)"
+                f"Menu khusus pengurus untuk mengaudit player, memenjarakan pelanggar aturan, serta menguji coba fitur via sistem cheat operasional."
             )
             await query.edit_message_text(text, reply_markup=get_back_button(), parse_mode="HTML")
+
+    # ==========================================
+    # HANDLER ACTION EXECUTION VIA BUTTONS
+    # ==========================================
+    elif data == "opaction_rekening_exec":
+        fake_update = Update(update.update_id, message=query.message)
+        await cmd_rekening(fake_update, context)
+    elif data == "opaction_daily_exec":
+        fake_update = Update(update.update_id, message=query.message)
+        await cmd_daily(fake_update, context)
+    elif data == "opaction_bribe_exec":
+        fake_update = Update(update.update_id, message=query.message)
+        await cmd_bribe(fake_update, context)
+    elif data == "opaction_work_exec":
+        fake_update = Update(update.update_id, message=query.message)
+        await cmd_work(fake_update, context)
+    elif data == "opaction_job_view":
+        fake_update = Update(update.update_id, message=query.message)
+        context.args = []
+        await cmd_job(fake_update, context)
+    elif data == "opaction_crime_view":
+        fake_update = Update(update.update_id, message=query.message)
+        context.args = []
+        await cmd_crime(fake_update, context)
+    elif data == "opaction_career_exec":
+        fake_update = Update(update.update_id, message=query.message)
+        context.args = []
+        await cmd_career(fake_update, context)
+    elif data == "opaction_badge_exec":
+        fake_update = Update(update.update_id, message=query.message)
+        await cmd_badge(fake_update, context)
+    elif data == "opaction_patrol_exec":
+        fake_update = Update(update.update_id, message=query.message)
+        await cmd_patrol(fake_update, context)
+    elif data == "opaction_wanted_exec":
+        fake_update = Update(update.update_id, message=query.message)
+        await cmd_wanted(fake_update, context)
+    elif data == "opaction_crew_exec":
+        fake_update = Update(update.update_id, message=query.message)
+        context.args = []
+        await cmd_crew(fake_update, context)
 
 # ==========================================
 # PUBLIC COMMAND HANDLERS
@@ -844,7 +927,6 @@ async def cmd_pardon(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(text, parse_mode="HTML")
 
 async def cmd_expose(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Khusus Jurnalis: Publikasikan rincian aset & Heat target ke publik."""
     user_id = update.effective_user.id
     current_username = update.effective_user.username or update.effective_user.first_name or "TanpaUsername"
     target_id = parse_target_id(context)
@@ -893,7 +975,6 @@ async def cmd_expose(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(text, parse_mode="HTML")
 
 async def cmd_amnesty(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Khusus Politisi: Menerbitkan amnesties pemotongan Heat & Bounty target."""
     user_id = update.effective_user.id
     current_username = update.effective_user.username or update.effective_user.first_name or "TanpaUsername"
     target_id = parse_target_id(context)
@@ -921,7 +1002,6 @@ async def cmd_amnesty(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if t_heat == 0 and t_bounty == 0:
             return await update.message.reply_text("⚠️ Target tidak memiliki Heat atau Bounty aktif untuk diberikan amnesties.")
 
-        # Persentase pemotongan Heat/Bounty berdasarkan rank politisi (20% s/d 80%)
         reduction_rate = 0.20 + (rank * 0.10)
         new_heat = int(t_heat * (1 - reduction_rate))
         new_bounty = int(t_bounty * (1 - reduction_rate))
@@ -1580,6 +1660,7 @@ def build_app():
     # Public Navigation & Callback Handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(menu_callback_handler, pattern="^opmenu_"))
+    app.add_handler(CallbackQueryHandler(menu_callback_handler, pattern="^opaction_"))
 
     # Public Operations Commands
     app.add_handler(CommandHandler("rekening", cmd_rekening))
