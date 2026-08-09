@@ -66,26 +66,31 @@ async def get_db_connection():
 # ==========================================
 async def init_wedding_db():
     async with get_db_connection() as db:
+        # Tabel Pengguna
         await db.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 user_id INTEGER PRIMARY KEY,
                 username TEXT,
                 koin INTEGER DEFAULT 1000000,
                 admin_tier INTEGER DEFAULT 0,
-                last_daily INTEGER DEFAULT 0
+                last_daily INTEGER DEFAULT 0,
+                created_at INTEGER
             )
         """)
 
-        user_columns = [
-            ("admin_tier", "INTEGER DEFAULT 0"),
-            ("last_daily", "INTEGER DEFAULT 0")
-        ]
-        for col_name, col_type in user_columns:
-            try:
-                await db.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_type};")
-            except Exception:
-                pass
+        # Tabel Log Transaksi Koin
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS koin_transactions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                amount INTEGER NOT NULL,
+                tipe_transaksi TEXT NOT NULL,
+                keterangan TEXT,
+                created_at INTEGER NOT NULL
+            )
+        """)
         
+        # Tabel Events
         await db.execute("""
             CREATE TABLE IF NOT EXISTS events (
                 event_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -107,10 +112,12 @@ async def init_wedding_db():
                 vendor_dekor TEXT DEFAULT 'Standar',
                 status TEXT DEFAULT 'Pending',
                 total_biaya INTEGER DEFAULT 1200000,
+                channel_msg_id INTEGER,
                 created_at INTEGER
             )
         """)
 
+        # Tabel RSVP
         await db.execute("""
             CREATE TABLE IF NOT EXISTS rsvp (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -119,22 +126,27 @@ async def init_wedding_db():
                 username TEXT,
                 status_rsvp TEXT,
                 kategori TEXT DEFAULT 'Umum',
-                meja TEXT DEFAULT 'Belum Diatur'
+                meja TEXT DEFAULT 'Belum Diatur',
+                created_at INTEGER
             )
         """)
 
+        # Tabel Angpao / Donasi
         await db.execute("""
             CREATE TABLE IF NOT EXISTS angpao (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 event_id INTEGER DEFAULT 1,
                 from_user_id INTEGER NOT NULL,
                 from_username TEXT,
+                tipe TEXT DEFAULT 'Angpao',
                 jumlah_koin INTEGER,
                 pesan TEXT,
+                channel_msg_id INTEGER,
                 created_at INTEGER
             )
         """)
 
+        # Tabel Klaim
         await db.execute("""
             CREATE TABLE IF NOT EXISTS claims (
                 claim_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -143,10 +155,14 @@ async def init_wedding_db():
                 tipe_klaim TEXT,
                 nominal INTEGER,
                 status TEXT DEFAULT 'Pending',
-                created_at INTEGER
+                admin_id INTEGER,
+                channel_msg_id INTEGER,
+                created_at INTEGER,
+                processed_at INTEGER
             )
         """)
 
+        # Tabel Song Requests
         await db.execute("""
             CREATE TABLE IF NOT EXISTS song_requests (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -154,18 +170,22 @@ async def init_wedding_db():
                 user_id INTEGER NOT NULL,
                 username TEXT,
                 judul_lagu TEXT,
-                status TEXT DEFAULT 'Pending'
+                status TEXT DEFAULT 'Pending',
+                created_at INTEGER
             )
         """)
 
+        # Tabel Photo Gallery (Photobooth)
         await db.execute("""
             CREATE TABLE IF NOT EXISTS photo_gallery (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 event_id INTEGER DEFAULT 1,
                 user_id INTEGER NOT NULL,
                 username TEXT,
-                photo_url TEXT,
-                caption TEXT
+                file_id TEXT NOT NULL,
+                caption TEXT,
+                channel_msg_id INTEGER,
+                created_at INTEGER
             )
         """)
 
@@ -187,19 +207,44 @@ async def check_admin_tier(db, user_id: int) -> int:
     except Exception:
         return 0
 
-async def send_to_channel(context: ContextTypes.DEFAULT_TYPE, text: str):
+async def log_koin_transaction(db, user_id: int, amount: int, tipe: str, keterangan: str):
+    now = int(time.time())
+    await db.execute(
+        "INSERT INTO koin_transactions (user_id, amount, tipe_transaksi, keterangan, created_at) VALUES (?, ?, ?, ?, ?)",
+        (user_id, amount, tipe, keterangan, now)
+    )
+
+async def send_to_channel(context: ContextTypes.DEFAULT_TYPE, text: str = None, photo_file_id: str = None, reply_markup=None):
+    """Mengirim pesan atau gambar ke Channel Telegram utama."""
+    if not CHANNEL_ID:
+        return None
     try:
-        if CHANNEL_ID:
-            await context.bot.send_message(chat_id=CHANNEL_ID, text=text, parse_mode="HTML")
+        if photo_file_id:
+            msg = await context.bot.send_photo(
+                chat_id=CHANNEL_ID,
+                photo=photo_file_id,
+                caption=text,
+                parse_mode="HTML",
+                reply_markup=reply_markup
+            )
+        else:
+            msg = await context.bot.send_message(
+                chat_id=CHANNEL_ID,
+                text=text,
+                parse_mode="HTML",
+                reply_markup=reply_markup
+            )
+        return msg.message_id
     except Exception as e:
-        logger.error(f"Gagal mengirim pesan ke channel {CHANNEL_ID}: {e}")
+        logger.error(f"Gagal mengirim media/pesan ke channel {CHANNEL_ID}: {e}")
+        return None
 
 async def global_error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.error(f"Exception occurred while handling an update: {context.error}", exc_info=context.error)
     if isinstance(update, Update) and update.effective_message:
         await update.effective_message.reply_text(
             "⚠️ <b>TERJADI KENDALA OPERASIONAL!</b>\n\n"
-            "Sistem event organizer mengalami masalah koneksi sementara. Silakan coba kembali perintah Anda.",
+            "Sistem event organizer mengalami gangguan koneksi sementara. Silakan coba kembali.",
             parse_mode="HTML"
         )
 
@@ -213,20 +258,20 @@ def get_main_menu():
             InlineKeyboardButton("🎉 Buat Event", callback_data="menu_buat_event")
         ],
         [
-            InlineKeyboardButton("🧑‍🤝‍🧑 Vendor & Role", callback_data="menu_vendor"),
+            InlineKeyboardButton("🧑‍🤝‍🧑 Vendor & MC", callback_data="menu_vendor"),
             InlineKeyboardButton("💌 Tamu & RSVP", callback_data="menu_rsvp")
         ],
         [
-            InlineKeyboardButton("⏱️ Rundown", callback_data="menu_rundown"),
-            InlineKeyboardButton("💰 Koin & Transaksi", callback_data="menu_koin")
+            InlineKeyboardButton("⏱️ Rundown Acara", callback_data="menu_rundown"),
+            InlineKeyboardButton("💰 Saldo & Koin", callback_data="menu_koin")
         ],
         [
-            InlineKeyboardButton("🎁 Angpao & Doorprize", callback_data="menu_angpao"),
+            InlineKeyboardButton("🎁 Angpao & Donasi", callback_data="menu_angpao"),
             InlineKeyboardButton("🎵 Music Request", callback_data="menu_musik")
         ],
         [
             InlineKeyboardButton("📸 Photobooth", callback_data="menu_photobooth"),
-            InlineKeyboardButton("🍽️ Layanan Meja Grup", callback_data="menu_layanan")
+            InlineKeyboardButton("🍽️ Layanan Meja", callback_data="menu_layanan")
         ],
         [
             InlineKeyboardButton("📊 Laporan Acara", callback_data="menu_laporan"),
@@ -242,16 +287,21 @@ def btn_back():
     return InlineKeyboardButton("◀️ Kembali ke Menu Utama", callback_data="menu_main")
 
 # ==========================================
-# START & CALLBACK ROUTER
+# START & MAIN ROUTER
 # ==========================================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     username = update.effective_user.username or update.effective_user.first_name
+    now = int(time.time())
+
+    # Clear state saat membuka menu utama
+    context.user_data.clear()
 
     async with get_db_connection() as db:
         await db.execute(
-            "INSERT INTO users (user_id, username) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET username=excluded.username",
-            (user_id, username)
+            """INSERT INTO users (user_id, username, created_at) VALUES (?, ?, ?) 
+               ON CONFLICT(user_id) DO UPDATE SET username=excluded.username""",
+            (user_id, username, now)
         )
         await db.commit()
 
@@ -259,9 +309,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "✨ <b>ROYAL WEDDING ORGANIZER & EVENT SIMULATOR (RP)</b> ✨\n"
         "──────────────────────────────────────────\n"
         "<i>\"Mewujudkan Impian Pernikahan Pasangan Pengantin Tanpa Batas\"</i>\n\n"
-        "Selamat datang di Sistem Manajemen Event & Roleplay! "
-        "Fasilitas ini terintegrasi langsung dengan channel <b>@RoyalWeddingRP</b>. "
-        "Kelola paket resepsi, klaim doorprize, angpao, hingga layanan makanan di grup melalui menu di bawah ini:"
+        "Selamat datang di Sistem Manajemen Event! "
+        "Fasilitas ini terintegrasi penuh dengan channel <b>@RoyalWeddingRP</b>.\n"
+        "Semua fitur dapat diakses secara interaktif melalui tombol di bawah ini:"
     )
     if update.callback_query:
         await update.callback_query.edit_message_text(text, reply_markup=get_main_menu(), parse_mode="HTML")
@@ -275,66 +325,41 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id
     username = query.from_user.username or query.from_user.first_name
 
+    # Reset input state jika berpindah menu
+    if not data.startswith("act_"):
+        context.user_data['state'] = None
+
     if data == "menu_main":
         await start(update, context)
 
+    # ----------------------------------------------------
+    # MENU PAKET & PRICING
+    # ----------------------------------------------------
     elif data == "menu_paket":
-        text = "📋 <b>KATALOG PAKET & PRICING EVENT</b>\n\nPilih jenis paket untuk melihat rincian fasilitas & biaya otomatis:"
+        text = "📋 <b>KATALOG PAKET & PRICING EVENT</b>\n\nPilih jenis paket untuk melihat rincian fasilitas & biaya:"
         keyboard = [
             [
                 InlineKeyboardButton("Silver (500k)", callback_data="pkt_silver"),
                 InlineKeyboardButton("Gold (1.2jt)", callback_data="pkt_gold"),
                 InlineKeyboardButton("Platinum (2.5jt)", callback_data="pkt_platinum")
             ],
-            [
-                InlineKeyboardButton("📊 Perbandingan Paket", callback_data="pkt_banding")
-            ],
+            [InlineKeyboardButton("📊 Perbandingan Paket", callback_data="pkt_banding")],
             [btn_back()]
         ]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
-    elif data == "pkt_silver":
-        text = (
-            "🤍 <b>PAKET SILVER — \"Simple & Sakral\"</b>\n"
-            "💵 Biaya Otomatis: <b>500.000 Koin</b>\n\n"
-            "<b>Fasilitas Termasuk:</b>\n"
-            "• Venue Kapasitas 100 Tamu\n"
-            "• Catering prasmanan 3 menu utama\n"
-            "• Dekorasi minimalis 1 warna tema\n"
-            "• MC + Sound System Standar\n"
-            "• Dokumentasi Foto Only"
-        )
-        keyboard = [[InlineKeyboardButton("◀️ Kembali ke Paket", callback_data="menu_paket")]]
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
-
-    elif data == "pkt_gold":
-        text = (
-            "💛 <b>PAKET GOLD — \"Elegant Wedding\"</b>\n"
-            "💵 Biaya Otomatis: <b>1.200.000 Koin</b>\n\n"
-            "<b>Fasilitas Termasuk:</b>\n"
-            "• Venue Kapasitas 250 Tamu\n"
-            "• Catering Prasmanan 5 menu utama + 2 snack corner\n"
-            "• Dekorasi tema custom\n"
-            "• MC + Band Akustik\n"
-            "• Dokumentasi Foto + Video (SDE)\n"
-            "• MUA + Busana Pengantin"
-        )
-        keyboard = [[InlineKeyboardButton("◀️ Kembali ke Paket", callback_data="menu_paket")]]
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
-
-    elif data == "pkt_platinum":
-        text = (
-            "💎 <b>PAKET PLATINUM — \"Royal Celebration\"</b>\n"
-            "💵 Biaya Otomatis: <b>2.500.000 Koin</b>\n\n"
-            "<b>Fasilitas Termasuk:</b>\n"
-            "• Venue Kapasitas 500+ Tamu (Indoor + Outdoor)\n"
-            "• Full course dinner 8 menu + 4 corner\n"
-            "• Dekorasi Premium + Lighting Artistik\n"
-            "• MC Bilingual + Live Band / Orkestra\n"
-            "• Dokumentasi Lengkap (Drone, SDE, Dokumenter)\n"
-            "• MUA + Busana Pria & Wanita 3x ganti"
-        )
-        keyboard = [[InlineKeyboardButton("◀️ Kembali ke Paket", callback_data="menu_paket")]]
+    elif data in ("pkt_silver", "pkt_gold", "pkt_platinum"):
+        pkt_map = {
+            "pkt_silver": ("SILVER — \"Simple & Sakral\"", "500.000 Koin", "• Venue 100 Tamu\n• Prasmanan 3 menu\n• Dekorasi Minimalis\n• MC + Sound Standard"),
+            "pkt_gold": ("GOLD — \"Elegant Wedding\"", "1.200.000 Koin", "• Venue 250 Tamu\n• Prasmanan 5 menu + 2 Snack Corner\n• Dekorasi Custom\n• MC + Band Akustik\n• Foto + Video SDE"),
+            "pkt_platinum": ("PLATINUM — \"Royal Celebration\"", "2.500.000 Koin", "• Venue 500+ Tamu (Indoor/Outdoor)\n• Full Course 8 Menu\n• Dekorasi Premium + Lighting\n• MC Bilingual + Orkestra\n• Full Dokumentasi (Drone)")
+        }
+        title, price, desc = pkt_map[data]
+        text = f"💎 <b>PAKET {title}</b>\n💵 Biaya: <b>{price}</b>\n\n<b>Fasilitas Termasuk:</b>\n{desc}"
+        keyboard = [
+            [InlineKeyboardButton("🎉 Pesan Paket Ini", callback_data=f"act_pilih_pkt_{data.split('_')[1]}")],
+            [InlineKeyboardButton("◀️ Kembali ke Katalog Paket", callback_data="menu_paket")]
+        ]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
     elif data == "pkt_banding":
@@ -348,46 +373,59 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "| Kapasitas     | 100 Tamu | 250 Tamu | 500+ Tamu        |\n"
             "| Menu Utama    | 3        | 5        | 8                |\n"
             "| Dokumentasi   | Foto     | Foto+SDE | Full+Drone       |\n"
-            "| MUA           | ❌       | 1x       | 3x               |\n"
             "+---------------+----------+----------+------------------"
             "</pre>"
         )
         keyboard = [[InlineKeyboardButton("◀️ Kembali ke Paket", callback_data="menu_paket")]]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
+    # ----------------------------------------------------
+    # MENU BUAT EVENT (FULL BUTTON)
+    # ----------------------------------------------------
     elif data == "menu_buat_event":
         text = "🎉 <b>PERENCANAAN & PEMBUATAN EVENT</b>\n\nPilih langkah operasional pembuatan acara:"
         keyboard = [
             [
-                InlineKeyboardButton("➕ Buat Acara Baru", callback_data="evt_baru"),
-                InlineKeyboardButton("📅 Cek Tanggal Kosong", callback_data="evt_tanggal")
+                InlineKeyboardButton("➕ Buat Event Baru", callback_data="act_start_create_event"),
+                InlineKeyboardButton("📅 Jadwal Terdaftar", callback_data="evt_jadwal")
             ],
             [
-                InlineKeyboardButton("🌸 Pilih Tema Dekor", callback_data="evt_tema"),
-                InlineKeyboardButton("✅ Konfirmasi Booking", callback_data="evt_konfirmasi")
+                InlineKeyboardButton("🌸 Katalog Tema Dekor", callback_data="evt_tema"),
+                InlineKeyboardButton("💳 Bayar Tagihan Event", callback_data="act_bayar_event")
             ],
             [btn_back()]
         ]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
-    elif data == "evt_baru":
+    elif data.startswith("act_pilih_pkt_") or data == "act_start_create_event":
+        pkt = data.replace("act_pilih_pkt_", "") if "act_pilih_pkt_" in data else "gold"
+        context.user_data['selected_paket'] = pkt
+        context.user_data['state'] = "WAITING_EVENT_DETAILS"
+        
         text = (
-            "📝 <b>FORMULIR PEMBUATAN EVENT & PAKET</b>\n\n"
-            "Gunakan sintaks komando lengkap berikut:\n"
-            "<code>/buat_event [Paket: silver/gold/platinum] | [Jenis] | [Nama Pria, Umur, Ortu] | [Nama Wanita, Umur, Ortu] | [Tgl&Jam] | [Lokasi] | [Est.Tamu]</code>\n\n"
+            f"📝 <b>FORMULIR PEMBUATAN EVENT ({pkt.upper()})</b>\n"
+            "──────────────────────────\n"
+            "Silakan ketik detail acara Anda dalam <b>SATU PESAN</b> dengan format berikut:\n\n"
+            "<code>Nama Pria, Umur, Nama Ortu Pria | Nama Wanita, Umur, Nama Ortu Wanita | Tgl & Jam | Lokasi | Est.Tamu</code>\n\n"
             "<i>Contoh:</i>\n"
-            "<code>/buat_event gold | Pernikahan | Sora Pratama, 26, Bp. Hendra | Hana Amelia, 24, Bp. Wijaya | 20-12-2026 10:00 | Grand Ballroom | 300</code>"
+            "<code>Sora Pratama, 26, Bp. Hendra | Hana Amelia, 24, Bp. Wijaya | 20-12-2026 10:00 WIB | Grand Ballroom | 300</code>"
         )
-        keyboard = [[InlineKeyboardButton("◀️ Kembali", callback_data="menu_buat_event")]]
+        keyboard = [[InlineKeyboardButton("❌ Batal", callback_data="menu_buat_event")]]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
-    elif data == "evt_tanggal":
-        text = (
-            "📅 <b>JADWAL EVENT TERDAFTAR</b>\n\n"
-            "• 20-12-2026 : 🔴 Terisi (Pernikahan Sora & Hana)\n"
-            "• 25-12-2026 : 🟢 Kosong (Tersedia)\n"
-            "• 05-01-2027 : 🟢 Kosong (Tersedia)"
-        )
+    elif data == "evt_jadwal":
+        async with get_db_connection() as db:
+            async with db.execute("SELECT event_id, mempelai_pria_nama, mempelai_wanita_nama, tgl_jam, status FROM events ORDER BY event_id DESC LIMIT 5") as cursor:
+                rows = await cursor.fetchall()
+        
+        list_evt = ""
+        if rows:
+            for eid, p, w, t, st in rows:
+                list_evt += f"• <b>Event #{eid}:</b> {p} & {w} ({t}) — [{st}]\n"
+        else:
+            list_evt = "<i>Belum ada event terdaftar.</i>"
+
+        text = f"📅 <b>JADWAL EVENT TERDAFTAR</b>\n\n{list_evt}"
         keyboard = [[InlineKeyboardButton("◀️ Kembali", callback_data="menu_buat_event")]]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
@@ -402,147 +440,246 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [[InlineKeyboardButton("◀️ Kembali", callback_data="menu_buat_event")]]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
-    elif data == "evt_konfirmasi":
+    elif data == "act_bayar_event":
         async with get_db_connection() as db:
-            async with db.execute(
-                """SELECT event_id, jenis_event, paket, mempelai_pria_nama, mempelai_wanita_nama, tgl_jam, status, total_biaya 
-                   FROM events WHERE host_user_id = ? ORDER BY event_id DESC LIMIT 1""", 
-                (user_id,)
-            ) as cursor:
-                row = await cursor.fetchone()
+            async with db.execute("SELECT event_id, total_biaya FROM events WHERE host_user_id = ? AND status = 'Pending' ORDER BY event_id DESC LIMIT 1", (user_id,)) as cursor:
+                event = await cursor.fetchone()
 
-        if row:
-            e_id, jenis, pkt, p_nama, w_nama, tgl, status, biaya = row
-            text = (
-                f"✅ <b>RINGKASAN EVENT #{e_id}</b>\n"
-                "──────────────────────────\n"
-                f"• <b>Status Event     :</b> {status}\n"
-                f"• <b>Paket Dipilih    :</b> Paket {pkt.upper()}\n"
-                f"• <b>Mempelai         :</b> {p_nama} & {w_nama}\n"
-                f"• <b>Tanggal & Jam    :</b> {tgl}\n"
-                f"• <b>Total Biaya      :</b> {biaya:,} Koin\n"
-                "──────────────────────────\n"
-                "<i>Ketik /bayar_event untuk melunasi biaya booking!</i>"
-            )
-        else:
-            text = "❌ Belum ada draf event aktif. Buat acara baru terlebih dahulu."
+            if not event:
+                return await query.edit_message_text("❌ Anda tidak memiliki tagihan event yang bernilai Pending.", reply_markup=InlineKeyboardMarkup([[btn_back()]]))
 
-        keyboard = [[InlineKeyboardButton("◀️ Kembali", callback_data="menu_buat_event")]]
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+            event_id, total_biaya = event
+            async with db.execute("SELECT koin FROM users WHERE user_id = ?", (user_id,)) as cursor:
+                user_row = await cursor.fetchone()
+                user_koin = user_row[0] if user_row else 0
 
+            if user_koin < total_biaya:
+                return await query.edit_message_text(f"❌ Saldo Koin Anda tidak mencukupi!\nBiaya: <b>{total_biaya:,} Koin</b>\nSaldo Anda: <b>{user_koin:,} Koin</b>", reply_markup=InlineKeyboardMarkup([[btn_back()]]), parse_mode="HTML")
+
+            await db.execute("UPDATE users SET koin = koin - ? WHERE user_id = ?", (total_biaya, user_id))
+            await db.execute("UPDATE events SET status = 'Paid' WHERE event_id = ?", (event_id,))
+            await log_koin_transaction(db, user_id, -total_biaya, "PAYMENT_EVENT", f"Pembayaran Booking Event #{event_id}")
+            await db.commit()
+
+        await query.edit_message_text(f"✅ <b>PEMBAYARAN SUCCESS!</b>\nEvent #{event_id} telah dilunasi senilai <b>{total_biaya:,} Koin</b>.", reply_markup=InlineKeyboardMarkup([[btn_back()]]), parse_mode="HTML")
+
+    # ----------------------------------------------------
+    # MENU VENDOR & ROLE MC
+    # ----------------------------------------------------
     elif data == "menu_vendor":
-        text = "🧑‍🤝‍🧑 <b>DIREKTORI VENDOR & OPERASIONAL ROLE</b>\n\nPilih kategori vendor untuk interaksi RP:"
+        text = "🧑‍🤝‍🧑 <b>DIREKTORI VENDOR & ROLEPLAY MC</b>\n\nPilih aksi operasional vendor:"
         keyboard = [
-            [InlineKeyboardButton("🎤 MC", callback_data="ven_mc"), InlineKeyboardButton("🍽️ Catering", callback_data="ven_catering")],
+            [InlineKeyboardButton("🎤 Panggil MC (Prosesi)", callback_data="ven_mc_select")],
+            [InlineKeyboardButton("🍽️ Layanan Catering", callback_data="act_catering_prompt"), InlineKeyboardButton("🥤 Layanan Bar/Minuman", callback_data="act_minum_prompt")],
             [btn_back()]
         ]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
-    elif data == "ven_mc":
-        text = (
-            "🎤 <b>ROLE MASTER OF CEREMONY (MC)</b>\n\n"
-            "• <code>/mc_buka</code> — Pembukaan acara\n"
-            "• <code>/mc_ijab</code> — Memandu Ijab Qabul\n"
-            "• <code>/mc_resepsi</code> — Sambutan resepsi\n"
-            "• <code>/mc_sungkem</code> — Momen sungkeman\n"
-            "• <code>/mc_tutup</code> — Penutupan"
-        )
-        keyboard = [[InlineKeyboardButton("◀️ Kembali", callback_data="menu_vendor")]]
+    elif data == "ven_mc_select":
+        text = "🎤 <b>PILIH NARRASI MC UNTUK PROSESI PESTA:</b>"
+        keyboard = [
+            [InlineKeyboardButton("📢 Pembukaan Acara", callback_data="mc_buka"), InlineKeyboardButton("💍 Procession Ijab Qabul", callback_data="mc_ijab")],
+            [InlineKeyboardButton("👑 Sambutan Resepsi", callback_data="mc_resepsi"), InlineKeyboardButton("🕯️ Sesi Sungkeman", callback_data="mc_sungkem")],
+            [InlineKeyboardButton("🎉 Penutupan Acara", callback_data="mc_tutup")],
+            [InlineKeyboardButton("◀️ Kembali", callback_data="menu_vendor")]
+        ]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
-    elif data == "ven_catering":
-        text = "🍽️ <b>CATERING DINET:</b> Gunakan <code>/minta_makan [menu]</code> di grup untuk memesan hidangan."
-        keyboard = [[InlineKeyboardButton("◀️ Kembali", callback_data="menu_vendor")]]
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+    elif data in ("mc_buka", "mc_ijab", "mc_resepsi", "mc_sungkem", "mc_tutup"):
+        mc_texts = {
+            "mc_buka": "🎤 <b>[MC ANNOUNCEMENT]</b>\n<i>\"Selamat datang bapak/ibu serta para tamu undangan sekalian di acara perayaan pernikahan yang penuh kebahagiaan ini...\"</i>",
+            "mc_ijab": "🎤 <b>[MC ANNOUNCEMENT]</b>\n<i>\"Momen sakral dan khidmat... Prosesi Ijab Qabul akan segera dimulai. Hadirin dimohon mengikutinya dengan penuh kekhusyukan...\"</i>",
+            "mc_resepsi": "🎤 <b>[MC ANNOUNCEMENT]</b>\n<i>\"Sambutlah kedua mempelai pengantin yang bersanding di pelaminan bagaikan Raja dan Ratu semalam!\"</i>",
+            "mc_sungkem": "🎤 <b>[MC ANNOUNCEMENT]</b>\n<i>\"Momen haru penuh rasa syukur, kedua mempelai memohon doa restu kepada kedua orang tua tercinta...\"</i>",
+            "mc_tutup": "🎤 <b>[MC ANNOUNCEMENT]</b>\n<i>\"Rangkaian acara telah usai. Kami mengucapkan terima kasih atas kehadiran dan doa restu Anda sekalian!\"</i>"
+        }
+        msg_text = mc_texts[data]
+        await send_to_channel(context, text=msg_text)
+        await query.edit_message_text(f"✅ Narasi MC telah disiarkan ke {CHANNEL_ID}:\n\n{msg_text}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Kembali", callback_data="ven_mc_select")]]), parse_mode="HTML")
 
-    elif data == "menu_angpao":
-        text = (
-            "🎁 <b>ANGPAO & KLAIM HADIAH DOORPRIZE</b>\n\n"
-            "Kirim angpao atau klaim hadiah ke Admin melalui komando berikut:\n\n"
-            "• <code>/angpao [jumlah] | [pesan_doa]</code> — Kirim Angpao\n"
-            "• <code>/klaim_doorprize [nominal_hadiah]</code> — Klaim Hadiah Doorprize\n"
-            "• <code>/klaim_angpao [nominal]</code> — Tarik Saldo Angpao Masuk\n"
-            "• <code>/bukutamu</code> — Lihat Buku Tamu & Doa"
-        )
-        keyboard = [[btn_back()]]
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
-
-    elif data == "menu_musik":
-        text = (
-            "🎵 <b>REQUEST LAGU KE BAND PESTA</b>\n\n"
-            "• <code>/request_lagu [Judul Lagu - Penyanyi]</code>\n"
-            "• <code>/daftar_lagu</code> — Cek Queue Antrean"
-        )
-        keyboard = [[btn_back()]]
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
-
+    # ----------------------------------------------------
+    # MENU PHOTOBOOTH (FIXED & IMPROVED IMAGE UPLOAD)
+    # ----------------------------------------------------
     elif data == "menu_photobooth":
         text = (
-            "📸 <b>DIGITAL PHOTO BOOTH & GALLERY</b>\n\n"
-            "• <code>/photobooth [caption]</code> — Upload foto pose & kirim otomatis ke @RoyalWeddingRP\n"
-            "• <code>/gallery</code> — Lihat galeri tamu"
+            "📸 <b>DIGITAL PHOTOBOOTH & GALLERY CHANNEL</b>\n"
+            "──────────────────────────\n"
+            "Unggah foto gaya/pose pesta Anda! Foto akan secara otomatis dipublikasikan langsung ke channel <b>@RoyalWeddingRP</b>."
         )
-        keyboard = [[btn_back()]]
+        keyboard = [
+            [InlineKeyboardButton("📷 Upload Foto Sekarang", callback_data="act_upload_photo")],
+            [InlineKeyboardButton("🖼️ Lihat Galeri Foto", callback_data="act_view_gallery")],
+            [btn_back()]
+        ]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
-    elif data == "menu_layanan":
+    elif data == "act_upload_photo":
+        context.user_data['state'] = "WAITING_PHOTOBOOTH_IMAGE"
         text = (
-            "🍽️ <b>LAYANAN MAKANAN & MINUMAN DI GRUP</b>\n\n"
-            "• <code>/minta_makan [menu]</code>\n"
-            "• <code>/minta_minum [menu]</code>\n\n"
-            "💌 <b>Konfirmasi RSVP Cepat:</b>"
+            "📸 <b>UPLOAD FOTO PHOTOBOOTH</b>\n\n"
+            "Silakan <b>KIRIMKAN GAMBAR/FOTO</b> Anda ke chat bot ini sekarang!\n"
+            "<i>(Anda juga bisa memberikan caption/ucapan pada foto yang dikirimkan)</i>"
         )
-        rsvp_markup = InlineKeyboardMarkup([
+        keyboard = [[InlineKeyboardButton("❌ Batal", callback_data="menu_photobooth")]]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+
+    elif data == "act_view_gallery":
+        async with get_db_connection() as db:
+            async with db.execute("SELECT username, caption, created_at FROM photo_gallery WHERE event_id = 1 ORDER BY id DESC LIMIT 5") as cursor:
+                rows = await cursor.fetchall()
+
+        if not rows:
+            gal_text = "<i>Belum ada foto terunggah di galeri.</i>"
+        else:
+            gal_text = ""
+            for u, c, t in rows:
+                gal_text += f"• @{u}: <i>\"{c}\"</i>\n"
+
+        text = f"🖼️ <b>GALERI PHOTOBOOTH TERAKHIR</b>\n\n{gal_text}"
+        keyboard = [[InlineKeyboardButton("◀️ Kembali", callback_data="menu_photobooth")]]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+
+    # ----------------------------------------------------
+    # MENU ANGPAO & DONASI (AUTO SEND CHANNEL)
+    # ----------------------------------------------------
+    elif data == "menu_angpao":
+        text = (
+            "🎁 <b>ANGPAO & DONASI PESTA PERNIKAHAN</b>\n"
+            "──────────────────────────\n"
+            "Kirimkan hadiah koin & doa restu kepada mempelai pengantin.\n"
+            "Angpao yang dikirimkan akan disiarkan langsung ke channel <b>@RoyalWeddingRP</b>!"
+        )
+        keyboard = [
             [
-                InlineKeyboardButton("✅ Hadir", callback_data="rsvp_hadir_btn"),
-                InlineKeyboardButton("❌ Tidak Hadir", callback_data="rsvp_tidak_btn")
+                InlineKeyboardButton("🎁 50.000 Koin", callback_data="act_angpao_50000"),
+                InlineKeyboardButton("🎁 100.000 Koin", callback_data="act_angpao_100000")
+            ],
+            [
+                InlineKeyboardButton("🎁 250.000 Koin", callback_data="act_angpao_250000"),
+                InlineKeyboardButton("🎁 500.000 Koin", callback_data="act_angpao_500000")
+            ],
+            [
+                InlineKeyboardButton("✏️ Custom Nominal Angpao", callback_data="act_angpao_custom")
+            ],
+            [
+                InlineKeyboardButton("📖 Lihat Buku Tamu & Doa", callback_data="act_buku_tamu"),
+                InlineKeyboardButton("💎 Klaim Doorprize", callback_data="act_claim_doorprize_prompt")
             ],
             [btn_back()]
-        ])
-        await query.edit_message_text(text, reply_markup=rsvp_markup, parse_mode="HTML")
+        ]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
+    elif data.startswith("act_angpao_"):
+        val_str = data.replace("act_angpao_", "")
+        if val_str == "custom":
+            context.user_data['state'] = "WAITING_ANGPAO_CUSTOM_AMOUNT"
+            text = "✏️ Ketikkan nominal Koin angpao/donasi yang ingin Anda berikan:"
+            return await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Batal", callback_data="menu_angpao")]]))
+        
+        amount = int(val_str)
+        context.user_data['angpao_amount'] = amount
+        context.user_data['state'] = "WAITING_ANGPAO_MESSAGE"
+        
+        text = f"✉️ <b>NILAI ANGPAO: {amount:,} KOIN</b>\n\nSilakan ketikkan <b>pesan/doa restu</b> Anda untuk pasangan pengantin:"
+        keyboard = [[InlineKeyboardButton("❌ Batal", callback_data="menu_angpao")]]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+
+    elif data == "act_buku_tamu":
+        async with get_db_connection() as db:
+            async with db.execute("SELECT from_username, jumlah_koin, pesan FROM angpao WHERE event_id = 1 ORDER BY id DESC LIMIT 10") as cursor:
+                rows = await cursor.fetchall()
+        if not rows:
+            bt_text = "<i>Belum ada pesan ucapan di buku tamu.</i>"
+        else:
+            bt_text = ""
+            for u, k, m in rows:
+                bt_text += f"• <b>@{u}</b> (🎁 {k:,} Koin): <i>\"{m}\"</i>\n"
+
+        text = f"📖 <b>BUKU TAMU & HARAPAN PENGANTIN</b>\n\n{bt_text}"
+        keyboard = [[InlineKeyboardButton("◀️ Kembali", callback_data="menu_angpao")]]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+
+    elif data == "act_claim_doorprize_prompt":
+        context.user_data['state'] = "WAITING_CLAIM_AMOUNT"
+        text = "💎 <b>KLAIM HADIAH DOORPRIZE / ANGPAO</b>\n\nKetik nominal koin klaim yang ingin diajukan ke Admin:"
+        keyboard = [[InlineKeyboardButton("❌ Batal", callback_data="menu_angpao")]]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+
+    # ----------------------------------------------------
+    # MENU TAMU & RSVP
+    # ----------------------------------------------------
     elif data == "menu_rsvp":
         async with get_db_connection() as db:
-            async with db.execute("SELECT username, status_rsvp, meja FROM rsvp WHERE event_id = 1") as cursor:
+            async with db.execute("SELECT username, status_rsvp, meja FROM rsvp WHERE event_id = 1 ORDER BY id DESC LIMIT 8") as cursor:
                 rows = await cursor.fetchall()
 
         list_tamu = ""
         if rows:
             for uname, st, meja in rows:
-                list_tamu += f"• @{uname} — <b>{st.upper()}</b> (Meja: {meja})\n"
+                icon = "✅" if st == "hadir" else "❌"
+                list_tamu += f"• @{uname} — {icon} <b>{st.upper()}</b> (Meja: {meja})\n"
         else:
-            list_tamu = "<i>Belum ada konfirmasi RSVP.</i>"
+            list_tamu = "<i>Belum ada konfirmasi kehadiran.</i>"
 
-        text = (
-            "💌 <b>MANAJEMEN TAMU & RSVP</b>\n\n"
-            f"<b>Daftar Kehadiran:</b>\n{list_tamu}"
-        )
-        rsvp_inline = InlineKeyboardMarkup([
+        text = f"💌 <b>KONFIRMASI KEHADIRAN (RSVP)</b>\n\n<b>Daftar Tamu Terakhir:</b>\n{list_tamu}"
+        keyboard = [
             [
-                InlineKeyboardButton("✅ Konfirmasi Hadir", callback_data="rsvp_hadir_btn"),
-                InlineKeyboardButton("❌ Konfirmasi Tidak Hadir", callback_data="rsvp_tidak_btn")
+                InlineKeyboardButton("✅ Hadir Pesta", callback_data="act_rsvp_hadir"),
+                InlineKeyboardButton("❌ Halangan Hadir", callback_data="act_rsvp_tidak")
             ],
             [btn_back()]
-        ])
-        await query.edit_message_text(text, reply_markup=rsvp_inline, parse_mode="HTML")
+        ]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
-    elif data in ("rsvp_hadir_btn", "rsvp_tidak_btn"):
-        st_val = "hadir" if data == "rsvp_hadir_btn" else "tidak"
+    elif data in ("act_rsvp_hadir", "act_rsvp_tidak"):
+        st_val = "hadir" if data == "act_rsvp_hadir" else "tidak"
+        now = int(time.time())
         async with get_db_connection() as db:
-            await db.execute("INSERT INTO rsvp (event_id, user_id, username, status_rsvp) VALUES (1, ?, ?, ?)", (user_id, username, st_val))
+            await db.execute("INSERT INTO rsvp (event_id, user_id, username, status_rsvp, created_at) VALUES (1, ?, ?, ?, ?)", (user_id, username, st_val, now))
             await db.commit()
 
         await query.edit_message_text(
-            f"💌 Terima kasih @{username}! Status RSVP Anda: **{st_val.upper()}**.",
+            f"💌 Terima kasih @{username}! Status Kehadiran RSVP Anda tercatat: <b>{st_val.upper()}</b>.",
             reply_markup=InlineKeyboardMarkup([[btn_back()]]),
             parse_mode="HTML"
         )
 
-    elif data == "menu_rundown":
-        text = "⏱️ <b>RUNDOWN:</b> Persiapan ➔ Akad ➔ <b>[Resepsi]</b> ➔ Hiburan ➔ Selesai"
-        keyboard = [[btn_back()]]
+    # ----------------------------------------------------
+    # MENU MUSIC REQUEST
+    # ----------------------------------------------------
+    elif data == "menu_musik":
+        text = "🎵 <b>REQUEST LAGU KE BAND PESTA</b>\n\nPilih opsi musik pesta di bawah ini:"
+        keyboard = [
+            [InlineKeyboardButton("🎼 Request Judul Lagu", callback_data="act_req_lagu_prompt")],
+            [InlineKeyboardButton("📜 Lihat Antrean Daftar Lagu", callback_data="act_list_lagu")],
+            [btn_back()]
+        ]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
+    elif data == "act_req_lagu_prompt":
+        context.user_data['state'] = "WAITING_SONG_NAME"
+        text = "🎼 Ketikkan <b>Judul Lagu & Nama Penyanyi</b> yang ingin dimainkan Band:"
+        keyboard = [[InlineKeyboardButton("❌ Batal", callback_data="menu_musik")]]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+
+    elif data == "act_list_lagu":
+        async with get_db_connection() as db:
+            async with db.execute("SELECT username, judul_lagu, status FROM song_requests WHERE event_id = 1 ORDER BY id DESC LIMIT 10") as cursor:
+                rows = await cursor.fetchall()
+        if not rows:
+            music_list = "<i>Antrean lagu masih kosong.</i>"
+        else:
+            music_list = ""
+            for u, l, s in rows:
+                music_list += f"• <b>{l}</b> (req: @{u}) — [{s}]\n"
+
+        text = f"🎵 <b>DAFTAR ANTREAN LAGU BAND</b>\n\n{music_list}"
+        keyboard = [[InlineKeyboardButton("◀️ Kembali", callback_data="menu_musik")]]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+
+    # ----------------------------------------------------
+    # MENU SALDO & KOIN
+    # ----------------------------------------------------
     elif data == "menu_koin":
         async with get_db_connection() as db:
             async with db.execute("SELECT koin FROM users WHERE user_id = ?", (user_id,)) as cursor:
@@ -550,447 +687,417 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 koin = row[0] if row else 0
 
         text = (
-            "💰 <b>KOIN & TRANSAKSI</b>\n\n"
-            f"• <b>Saldo Anda :</b> <b>{koin:,} Koin</b>\n"
-            "• <code>/transfer_koin [user_id] [jumlah]</code>\n"
-            "• <code>/daily_koin</code> — Klaim harian (+50k)"
+            "💰 <b>SALDO KOIN & KEUANGAN</b>\n"
+            "──────────────────────────\n"
+            f"• <b>Saldo Anda :</b> <b>{koin:,} Koin</b>\n\n"
+            "Gunakan tombol di bawah ini untuk klaim tunjangan harian atau kirim koin:"
+        )
+        keyboard = [
+            [InlineKeyboardButton("💵 Klaim Koin Harian (+50k)", callback_data="act_daily_koin")],
+            [InlineKeyboardButton("💸 Transfer Koin ke User", callback_data="act_transfer_prompt")],
+            [btn_back()]
+        ]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+
+    elif data == "act_daily_koin":
+        now = int(time.time())
+        async with get_db_connection() as db:
+            async with db.execute("SELECT last_daily FROM users WHERE user_id = ?", (user_id,)) as cursor:
+                row = await cursor.fetchone()
+                last = row[0] if row and row[0] else 0
+
+            if now - last < 86400:
+                sisa_jam = round((86400 - (now - last)) / 3600, 1)
+                return await query.edit_message_text(f"⏳ Tunjangan harian sudah diklaim!\nSilakan coba lagi dalam <b>{sisa_jam} jam</b>.", reply_markup=InlineKeyboardMarkup([[btn_back()]]), parse_mode="HTML")
+
+            await db.execute("UPDATE users SET koin = koin + 50000, last_daily = ? WHERE user_id = ?", (now, user_id))
+            await log_koin_transaction(db, user_id, 50000, "DAILY_BONUS", "Klaim Tunjangan Harian")
+            await db.commit()
+
+        await query.edit_message_text("💵 <b>KLAIM SUCCESS!</b>\nAnda mendapatkan bonus harian <b>+50.000 Koin</b>.", reply_markup=InlineKeyboardMarkup([[btn_back()]]), parse_mode="HTML")
+
+    elif data == "act_transfer_prompt":
+        context.user_data['state'] = "WAITING_TRANSFER_DATA"
+        text = "💸 Ketikkan transfer dengan format:\n<code>[User_ID_Tujuan] [Jumlah_Koin]</code>\n\n<i>Contoh:</i>\n<code>12345678 100000</code>"
+        keyboard = [[InlineKeyboardButton("❌ Batal", callback_data="menu_koin")]]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+
+    # ----------------------------------------------------
+    # MENU LAYANAN MEJA & CATERING
+    # ----------------------------------------------------
+    elif data == "menu_layanan":
+        text = "🍽️ <b>LAYANAN MAKANAN & MINUMAN MEJA GRUP</b>\n\nPilih layanan pramusaji:"
+        keyboard = [
+            [InlineKeyboardButton("🍽️ Pesan Makanan", callback_data="act_catering_prompt"), InlineKeyboardButton("🥤 Pesan Minuman", callback_data="act_minum_prompt")],
+            [btn_back()]
+        ]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+
+    elif data in ("act_catering_prompt", "act_minum_prompt"):
+        is_food = (data == "act_catering_prompt")
+        context.user_data['state'] = "WAITING_CATERING_ORDER" if is_food else "WAITING_DRINK_ORDER"
+        item_type = "makanan" if is_food else "minuman"
+        text = f"🍽️ Ketikkan menu {item_type} yang ingin Anda pesan dari pramusaji:"
+        keyboard = [[InlineKeyboardButton("❌ Batal", callback_data="menu_layanan")]]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+
+    # ----------------------------------------------------
+    # RUNDOWN, LAPORAN & BANTUAN
+    # ----------------------------------------------------
+    elif data == "menu_rundown":
+        text = (
+            "⏱️ <b>RUNDOWN ACARA PESTA PERNIKAHAN</b>\n"
+            "──────────────────────────\n"
+            "• 08.00 WIB — Registrasi & Penyambutan Tamu\n"
+            "• 09.00 WIB — Procession Akad Nikah & Ijab Qabul\n"
+            "• 11.00 WIB — Pembukaan Resepsi & Kirab Pengantin\n"
+            "• 12.00 WIB — Ramah Tamah, Catering & Hiburan Band\n"
+            "• 14.00 WIB — Pengundian Doorprize & Sesi Foto\n"
+            "• 15.00 WIB — Penutupan Acara"
         )
         keyboard = [[btn_back()]]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
     elif data == "menu_laporan":
-        text = "📊 <b>LAPORAN EVENT:</b> Berjalan sukses dengan rating ⭐⭐⭐⭐⭐ (5.0/5.0)."
+        text = "📊 <b>LAPORAN EVENT ORGANIZER</b>\n\nAcara simulasi berjalan lancar dengan indeks kepuasan tamu ⭐⭐⭐⭐⭐ (5.0/5.0)."
         keyboard = [[btn_back()]]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
+    elif data == "menu_bantuan":
+        text = (
+            "❓ <b>PANDUAN OPERASIONAL BOT</b>\n\n"
+            "• Gunakan semua tombol interaktif untuk mengontrol event.\n"
+            "• Foto Photobooth & Angpao akan otomatis terkirim ke <b>@RoyalWeddingRP</b>.\n"
+            "• Jika mengalami kendala, hubungi Admin melalui menu Admin Panel."
+        )
+        keyboard = [[btn_back()]]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+
+    # ----------------------------------------------------
+    # MENU ADMIN PANEL (WITH BUTTON APPROVALS)
+    # ----------------------------------------------------
     elif data == "menu_admin":
         async with get_db_connection() as db:
             tier = await check_admin_tier(db, user_id)
 
         if tier < 1:
-            return await query.edit_message_text("🚫 <b>AKSES DITOLAK:</b> Khusus Admin.", reply_markup=InlineKeyboardMarkup([[btn_back()]]), parse_mode="HTML")
+            return await query.edit_message_text("🚫 <b>AKSES DITOLAK:</b> Fitur ini khusus Admin.", reply_markup=InlineKeyboardMarkup([[btn_back()]]), parse_mode="HTML")
 
         text = (
-            f"⚙️ <b>ADMIN CONTROL PANEL (Tier {tier})</b>\n\n"
-            "• <code>/set_admin [user_id] [tier]</code>\n"
-            "• <code>/list_klaim</code> — Lihat daftar klaim hadiah/angpao\n"
-            "• <code>/verifikasi_klaim [claim_id] [approve/reject]</code>\n"
-            "• <code>/doorprize</code> — Undi doorprize acak\n"
-            "• <code>/reset_event</code> — Reset data event"
+            f"⚙️ <b>ADMIN CONTROL PANEL (Tier {tier})</b>\n"
+            "──────────────────────────\n"
+            "Kelola persetujuan klaim dan acara melalui tombol di bawah:"
         )
-        keyboard = [[btn_back()]]
+        keyboard = [
+            [InlineKeyboardButton("📋 Kelola Klaim Pending", callback_data="adm_list_klaim")],
+            [InlineKeyboardButton("🎲 Undi Doorprize Tamu", callback_data="adm_draw_doorprize")],
+            [InlineKeyboardButton("🔄 Reset Event Data", callback_data="adm_reset_event")],
+            [btn_back()]
+        ]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
-    elif data == "menu_bantuan":
-        text = "❓ <b>BANTUAN:</b> Gunakan tombol interaktif atau command untuk mengontrol simulasi pernikahan di @RoyalWeddingRP."
-        keyboard = [[btn_back()]]
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+    elif data == "adm_list_klaim":
+        async with get_db_connection() as db:
+            async with db.execute("SELECT claim_id, username, tipe_klaim, nominal FROM claims WHERE status = 'Pending' LIMIT 5") as cursor:
+                rows = await cursor.fetchall()
+
+        if not rows:
+            return await query.edit_message_text("📋 Tidak ada antrean klaim pending.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Kembali", callback_data="menu_admin")]]))
+
+        keyboard = []
+        lines = ["📋 <b>DAFTAR KLAIM PENDING</b>\n"]
+        for cid, uname, tipe, nom in rows:
+            lines.append(f"• ID #{cid} | @{uname} | {tipe} | <b>{nom:,} Koin</b>")
+            keyboard.append([
+                InlineKeyboardButton(f"✅ Approve #{cid}", callback_data=f"adm_app_{cid}"),
+                InlineKeyboardButton(f"❌ Reject #{cid}", callback_data=f"adm_rej_{cid}")
+            ])
+        keyboard.append([InlineKeyboardButton("◀️ Kembali", callback_data="menu_admin")])
+        await query.edit_message_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+
+    elif data.startswith("adm_app_") or data.startswith("adm_rej_"):
+        cid = int(data.split("_")[2])
+        is_approve = "adm_app_" in data
+        now = int(time.time())
+
+        async with get_db_connection() as db:
+            async with db.execute("SELECT user_id, tipe_klaim, nominal, status FROM claims WHERE claim_id = ?", (cid,)) as cursor:
+                claim = await cursor.fetchone()
+
+            if not claim or claim[3] != 'Pending':
+                return await query.edit_message_text("❌ Klaim ini sudah diproses atau tidak ditemukan.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Kembali", callback_data="adm_list_klaim")]]))
+
+            t_id, tipe, nom, _ = claim
+
+            if is_approve:
+                await db.execute("UPDATE claims SET status = 'Approved', admin_id = ?, processed_at = ? WHERE claim_id = ?", (user_id, now, cid))
+                await db.execute("UPDATE users SET koin = koin + ? WHERE user_id = ?", (nom, t_id))
+                await log_koin_transaction(db, t_id, nom, "CLAIM_APPROVED", f"Klaim {tipe} #{cid} disetujui admin")
+                await db.commit()
+                res_text = f"✅ Klaim #{cid} disetujui. Saldo <b>{nom:,} Koin</b> telah dikirim ke user."
+            else:
+                await db.execute("UPDATE claims SET status = 'Rejected', admin_id = ?, processed_at = ? WHERE claim_id = ?", (user_id, now, cid))
+                await db.commit()
+                res_text = f"❌ Klaim #{cid} telah ditolak."
+
+        await query.edit_message_text(res_text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Kembali ke Klaim", callback_data="adm_list_klaim")]]), parse_mode="HTML")
+
+    elif data == "adm_draw_doorprize":
+        async with get_db_connection() as db:
+            async with db.execute("SELECT username FROM rsvp WHERE event_id = 1 AND status_rsvp = 'hadir'") as cursor:
+                rows = await cursor.fetchall()
+        if not rows:
+            return await query.edit_message_text("🎲 Belum ada tamu hadir untuk diundi.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Kembali", callback_data="menu_admin")]]))
+
+        winner = random.choice(rows)[0]
+        broadcast_msg = f"🎲 <b>LUCKY DRAW WINNER (@RoyalWeddingRP)</b>\n🏆 Selamat Kepada <b>@{winner}</b> memenangkan Doorprize Utama Pesta!"
+        await send_to_channel(context, text=broadcast_msg)
+        await query.edit_message_text(f"🎲 <b>Pemenang Undian:</b> @{winner}!\nHasil telah disiarkan ke channel.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Kembali", callback_data="menu_admin")]), parse_mode="HTML"])
+
+    elif data == "adm_reset_event":
+        async with get_db_connection() as db:
+            await db.execute("DELETE FROM events")
+            await db.execute("DELETE FROM rsvp")
+            await db.execute("DELETE FROM angpao")
+            await db.execute("DELETE FROM claims")
+            await db.commit()
+        await query.edit_message_text("🔄 Data event & registrasi telah berhasil di-reset.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Kembali", callback_data="menu_admin")]]))
 
 # ==========================================
-# COMMANDS RSVP & LAINNYA
+# MESSAGE HANDLERS (TEXT & PHOTO INPUTS)
 # ==========================================
-async def cmd_rsvp(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_photo_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Menangani pengiriman foto untuk Photobooth & posting otomatis ke Channel."""
+    state = context.user_data.get('state')
     user_id = update.effective_user.id
     username = update.effective_user.username or update.effective_user.first_name
-    
-    if not context.args:
-        return await update.message.reply_text("Format: <code>/rsvp [hadir|tidak]</code>", parse_mode="HTML")
-
-    st = context.args[0].lower()
-    if st not in ("hadir", "tidak", "mungkin"):
-        return await update.message.reply_text("❌ Status RSVP hanya: `hadir`, `tidak`, `mungkin`.", parse_mode="HTML")
-
-    async with get_db_connection() as db:
-        await db.execute(
-            "INSERT INTO rsvp (event_id, user_id, username, status_rsvp) VALUES (1, ?, ?, ?)",
-            (user_id, username, st)
-        )
-        await db.commit()
-
-    await update.message.reply_text(f"💌 Konfirmasi RSVP dari @{username} tercatat: <b>{st.upper()}</b>.", parse_mode="HTML")
-
-async def cmd_klaim_doorprize(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    username = update.effective_user.username or update.effective_user.first_name
-    
-    if not context.args or not context.args[0].isdigit():
-        return await update.message.reply_text("Format: <code>/klaim_doorprize [nominal]</code>", parse_mode="HTML")
-    
-    nominal = int(context.args[0])
+    caption = update.message.caption or "Pose Cantik di Resepsi Wedding RP ✨"
     now = int(time.time())
 
+    # Ambil file_id dari foto resolusi tertinggi
+    photo_file_id = update.message.photo[-1].file_id
+
+    # Kirim Gambar & Caption Langsung ke Channel Telegram
+    channel_text = f"📸 <b>PHOTOBOOTH FEED (@RoyalWeddingRP)</b>\n👤 Tamu: <b>@{username}</b>\n💬 <i>\"{caption}\"</i>"
+    ch_msg_id = await send_to_channel(context, text=channel_text, photo_file_id=photo_file_id)
+
     async with get_db_connection() as db:
         await db.execute(
-            "INSERT INTO claims (user_id, username, tipe_klaim, nominal, status, created_at) VALUES (?, ?, 'Doorprize', ?, 'Pending', ?)",
-            (user_id, username, nominal, now)
+            "INSERT INTO photo_gallery (event_id, user_id, username, file_id, caption, channel_msg_id, created_at) VALUES (1, ?, ?, ?, ?, ?, ?)",
+            (user_id, username, photo_file_id, caption, ch_msg_id, now)
         )
         await db.commit()
 
-    await update.message.reply_text(f"📝 Permintaan klaim Doorprize senilai <b>{nominal:,} Koin</b> telah dikirim ke Admin.", parse_mode="HTML")
-    await send_to_channel(context, f"🔔 <b>KLAIM DOORPRIZE BARU</b>\n👤 @{username} mengajukan klaim doorprize senilai <b>{nominal:,} Koin</b>.")
+    context.user_data['state'] = None
+    await update.message.reply_text(
+        f"📸 <b>FOTO PHOTOBOOTH BERHASIL DIUNGGAH!</b>\n\nFoto Anda telah dipublikasikan secara otomatis ke channel <b>{CHANNEL_ID}</b>.",
+        reply_markup=InlineKeyboardMarkup([[btn_back()]]),
+        parse_mode="HTML"
+    )
 
-async def cmd_klaim_angpao(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Menangani masukan teks berdasarkan alur/state tombol pengguna."""
+    state = context.user_data.get('state')
+    if not state:
+        return
+
     user_id = update.effective_user.id
     username = update.effective_user.username or update.effective_user.first_name
-    
-    if not context.args or not context.args[0].isdigit():
-        return await update.message.reply_text("Format: <code>/klaim_angpao [nominal]</code>", parse_mode="HTML")
-    
-    nominal = int(context.args[0])
+    text_input = update.message.text.strip()
     now = int(time.time())
 
-    async with get_db_connection() as db:
-        await db.execute(
-            "INSERT INTO claims (user_id, username, tipe_klaim, nominal, status, created_at) VALUES (?, ?, 'Angpao', ?, 'Pending', ?)",
-            (user_id, username, nominal, now)
+    # 1. State Input Detail Event Baru
+    if state == "WAITING_EVENT_DETAILS":
+        parts = [p.strip() for p in text_input.split("|")]
+        if len(parts) < 5:
+            return await update.message.reply_text("❌ Format salah! Harap masukkan data dipisahkan tanda `|` sesuai petunjuk.")
+
+        pkt = context.user_data.get('selected_paket', 'gold')
+        biaya = PAKET_PRICING.get(pkt, 1200000)
+
+        pria_raw, wanita_raw, tgl, lokasi, est_tamu = parts[0:5]
+        p_parts = [x.strip() for x in pria_raw.split(",")]
+        w_parts = [x.strip() for x in wanita_raw.split(",")]
+
+        p_nama = p_parts[0] if len(p_parts) > 0 else "Pria"
+        p_umur = int(p_parts[1]) if len(p_parts) > 1 and p_parts[1].isdigit() else 25
+        p_ortu = p_parts[2] if len(p_parts) > 2 else "Keluarga"
+
+        w_nama = w_parts[0] if len(w_parts) > 0 else "Wanita"
+        w_umur = int(w_parts[1]) if len(w_parts) > 1 and w_parts[1].isdigit() else 23
+        w_ortu = w_parts[2] if len(w_parts) > 2 else "Keluarga"
+
+        est_num = int(est_tamu) if est_tamu.isdigit() else 100
+
+        # Broadcast Pengumuman Event ke Channel
+        ch_text = (
+            f"📢 <b>NEW WEDDING EVENT REGISTERED!</b>\n"
+            "──────────────────────────\n"
+            f"📦 <b>Paket        :</b> Paket {pkt.upper()} ({biaya:,} Koin)\n"
+            f"🤵 <b>Mempelai Pria:</b> {p_nama} ({p_umur} Thn)\n"
+            f"👰 <b>Mempelai Wn :</b> {w_nama} ({w_umur} Thn)\n"
+            "──────────────────────────\n"
+            f"📍 <b>Lokasi       :</b> {lokasi}\n"
+            f"📅 <b>Waktu        :</b> {tgl}\n"
+            "──────────────────────────\n"
+            "<i>Konfirmasi kehadiran Anda melalui tombol RSVP di bot!</i>"
         )
-        await db.commit()
+        ch_id = await send_to_channel(context, text=ch_text)
 
-    await update.message.reply_text(f"📝 Permintaan pencairan Angpao senilai <b>{nominal:,} Koin</b> telah dikirim ke Admin.", parse_mode="HTML")
-
-async def cmd_list_klaim(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    async with get_db_connection() as db:
-        tier = await check_admin_tier(db, user_id)
-        if tier < 1:
-            return await update.message.reply_text("🚫 Khusus Admin.")
-
-        async with db.execute("SELECT claim_id, username, tipe_klaim, nominal FROM claims WHERE status = 'Pending'") as cursor:
-            rows = await cursor.fetchall()
-
-    if not rows:
-        return await update.message.reply_text("📋 Tidak ada antrean klaim pending.")
-
-    lines = ["📋 <b>DAFTAR KLAIM PENDING</b>\n"]
-    for cid, uname, tipe, nom in rows:
-        lines.append(f"• ID: <code>{cid}</code> | @{uname} | {tipe} | <b>{nom:,} Koin</b>\n  ↳ Gunakan: <code>/verifikasi_klaim {cid} approve</code>")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
-
-async def cmd_verifikasi_klaim(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    async with get_db_connection() as db:
-        tier = await check_admin_tier(db, user_id)
-        if tier < 1:
-            return await update.message.reply_text("🚫 Khusus Admin.")
-
-        if len(context.args) < 2 or not context.args[0].isdigit():
-            return await update.message.reply_text("Format: <code>/verifikasi_klaim [claim_id] [approve/reject]</code>", parse_mode="HTML")
-
-        cid = int(context.args[0])
-        action = context.args[1].lower()
-
-        async with db.execute("SELECT user_id, tipe_klaim, nominal, status FROM claims WHERE claim_id = ?", (cid,)) as cursor:
-            claim = await cursor.fetchone()
-
-        if not claim or claim[3] != 'Pending':
-            return await update.message.reply_text("❌ Klaim tidak ditemukan atau sudah diproses.")
-
-        t_id, tipe, nom, _ = claim
-
-        if action == "approve":
-            await db.execute("UPDATE claims SET status = 'Approved' WHERE claim_id = ?", (cid,))
-            await db.execute("INSERT INTO users (user_id, koin) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET koin=koin+?", (t_id, nom, nom))
+        async with get_db_connection() as db:
+            await db.execute(
+                """INSERT INTO events (host_user_id, jenis_event, paket, mempelai_pria_nama, mempelai_pria_umur, mempelai_pria_ortu,
+                                     mempelai_wanita_nama, mempelai_wanita_umur, mempelai_wanita_ortu, tgl_jam, lokasi, est_tamu, status, total_biaya, channel_msg_id, created_at)
+                   VALUES (?, 'Pernikahan', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending', ?, ?, ?)""",
+                (user_id, pkt, p_nama, p_umur, p_ortu, w_nama, w_umur, w_ortu, tgl, lokasi, est_num, biaya, ch_id, now)
+            )
             await db.commit()
-            await update.message.reply_text(f"✅ Klaim #{cid} disetujui. Saldo <b>{nom:,} Koin</b> ditambahkan ke user.")
-        else:
-            await db.execute("UPDATE claims SET status = 'Rejected' WHERE claim_id = ?", (cid,))
-            await db.commit()
-            await update.message.reply_text(f"❌ Klaim #{cid} ditolak.")
 
-async def cmd_buat_event(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    raw_text = " ".join(context.args)
-
-    if "|" not in raw_text:
-        return await update.message.reply_text(
-            "❌ <b>Format Salah!</b>\n\n"
-            "Gunakan format:\n"
-            "<code>/buat_event [paket] | [Jenis] | [Pria, Umur, Ortu] | [Wanita, Umur, Ortu] | [Tgl] | [Lokasi] | [Tamu]</code>",
+        context.user_data['state'] = None
+        await update.message.reply_text(
+            f"🎉 <b>EVENT BERHASIL DIBUAT!</b>\n\nAcara pernikahan berhasil didaftarkan dengan Paket <b>{pkt.upper()}</b> dan disiarkan ke channel.",
+            reply_markup=InlineKeyboardMarkup([[btn_back()]]),
             parse_mode="HTML"
         )
 
-    parts = [p.strip() for p in raw_text.split("|")]
-    if len(parts) < 7:
-        return await update.message.reply_text("❌ Parameter kurang lengkap. Harus ada 7 bagian dipisahkan <code>|</code>.", parse_mode="HTML")
+    # 2. State Input Pesan Angpao
+    elif state == "WAITING_ANGPAO_MESSAGE":
+        amount = context.user_data.get('angpao_amount', 50000)
+        pesan = text_input
 
-    paket = parts[0].lower()
-    if paket not in PAKET_PRICING:
-        paket = "gold"
+        async with get_db_connection() as db:
+            async with db.execute("SELECT koin FROM users WHERE user_id = ?", (user_id,)) as cursor:
+                row = await cursor.fetchone()
+                bal = row[0] if row else 0
 
-    biaya_otomatis = PAKET_PRICING[paket]
-    jenis, pria_raw, wanita_raw, tgl, lokasi, est_tamu = parts[1:7]
-    
-    pria_parts = [x.strip() for x in pria_raw.split(",")]
-    p_nama = pria_parts[0] if len(pria_parts) > 0 else "Pria"
-    p_umur = int(pria_parts[1]) if len(pria_parts) > 1 and pria_parts[1].isdigit() else 25
-    p_ortu = pria_parts[2] if len(pria_parts) > 2 else "Keluarga"
+            if bal < amount:
+                context.user_data['state'] = None
+                return await update.message.reply_text("❌ Saldo Koin Anda tidak mencukupi untuk memberikan angpao ini.")
 
-    wanita_parts = [x.strip() for x in wanita_raw.split(",")]
-    w_nama = wanita_parts[0] if len(wanita_parts) > 0 else "Wanita"
-    w_umur = int(wanita_parts[1]) if len(wanita_parts) > 1 and wanita_parts[1].isdigit() else 23
-    w_ortu = wanita_parts[2] if len(wanita_parts) > 2 else "Keluarga"
+            # Potong Saldo Koin
+            await db.execute("UPDATE users SET koin = koin - ? WHERE user_id = ?", (amount, user_id))
+            await log_koin_transaction(db, user_id, -amount, "ANGPAO_GIVE", f"Kirim Angpao {amount} Koin")
 
-    est_tamu_num = int(est_tamu) if est_tamu.isdigit() else 100
-    now_epoch = int(time.time())
+            # Disiarkan ke Channel
+            ch_text = (
+                f"🎁 <b>ANGPAO & WISHING BROADCAST</b>\n"
+                "──────────────────────────\n"
+                f"✉️ <b>Dari:</b> @{username}\n"
+                f"💰 <b>Nominal:</b> {amount:,} Koin\n"
+                f"🕊️ <b>Doa Restu:</b> <i>\"{pesan}\"</i>"
+            )
+            ch_msg_id = await send_to_channel(context, text=ch_text)
 
-    async with get_db_connection() as db:
-        await db.execute(
-            """INSERT INTO events (host_user_id, jenis_event, paket, mempelai_pria_nama, mempelai_pria_umur, mempelai_pria_ortu,
-                                 mempelai_wanita_nama, mempelai_wanita_umur, mempelai_wanita_ortu, tgl_jam, lokasi, est_tamu, status, total_biaya, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending', ?, ?)""",
-            (user_id, jenis, paket, p_nama, p_umur, p_ortu, w_nama, w_umur, w_ortu, tgl, lokasi, est_tamu_num, biaya_otomatis, now_epoch)
+            await db.execute(
+                "INSERT INTO angpao (event_id, from_user_id, from_username, tipe, jumlah_koin, pesan, channel_msg_id, created_at) VALUES (1, ?, ?, 'Angpao', ?, ?, ?, ?)",
+                (user_id, username, amount, pesan, ch_msg_id, now)
+            )
+            await db.commit()
+
+        context.user_data['state'] = None
+        await update.message.reply_text(
+            f"🎁 <b>ANGPAO TERKIRIM!</b>\n\nAngpao sebesar <b>{amount:,} Koin</b> telah dikirimkan ke mempelai dan dipublikasikan ke channel.",
+            reply_markup=InlineKeyboardMarkup([[btn_back()]]),
+            parse_mode="HTML"
         )
-        await db.commit()
 
-    channel_msg = (
-        f"📢 <b>ANNOUNCEMENT: NEW WEDDING EVENT REGISTERED!</b>\n"
-        "──────────────────────────\n"
-        f"📦 <b>Paket Pesta    :</b> Paket {paket.upper()} ({biaya_otomatis:,} Koin)\n"
-        f"🤵 <b>Mempelai Pria  :</b> {p_nama} ({p_umur} Thn)\n"
-        f"👰 <b>Mempelai Wanita:</b> {w_nama} ({w_umur} Thn)\n"
-        "──────────────────────────\n"
-        f"📍 <b>Lokasi Pesta   :</b> {lokasi}\n"
-        f"📅 <b>Tanggal & Jam :</b> {tgl}\n"
-        "──────────────────────────\n"
-        "<i>Konfirmasi kehadiran Anda melalui komando /rsvp di @RoyalWeddingRP!</i>"
-    )
-    await send_to_channel(context, channel_msg)
-    await update.message.reply_text(f"🎉 Event berhasil dicatat dengan Paket **{paket.upper()}** (Total Biaya: **{biaya_otomatis:,} Koin**) dan dikirim ke {CHANNEL_ID}!", parse_mode="HTML")
+    # 3. State Nominal Angpao Custom
+    elif state == "WAITING_ANGPAO_CUSTOM_AMOUNT":
+        if not text_input.isdigit() or int(text_input) <= 0:
+            return await update.message.reply_text("❌ Harap masukkan angka nominal koin yang valid.")
+        
+        context.user_data['angpao_amount'] = int(text_input)
+        context.user_data['state'] = "WAITING_ANGPAO_MESSAGE"
+        await update.message.reply_text("✉️ Sekarang ketikkan <b>pesan/doa restu</b> Anda untuk pasangan pengantin:")
 
-async def cmd_bayar_event(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    async with get_db_connection() as db:
-        async with db.execute("SELECT event_id, total_biaya FROM events WHERE host_user_id = ? AND status = 'Pending' ORDER BY event_id DESC LIMIT 1", (user_id,)) as cursor:
-            event = await cursor.fetchone()
+    # 4. State Klaim Doorprize
+    elif state == "WAITING_CLAIM_AMOUNT":
+        if not text_input.isdigit() or int(text_input) <= 0:
+            return await update.message.reply_text("❌ Harap masukkan nominal klaim angka valid.")
+        
+        nom = int(text_input)
+        async with get_db_connection() as db:
+            await db.execute(
+                "INSERT INTO claims (user_id, username, tipe_klaim, nominal, status, created_at) VALUES (?, ?, 'Doorprize', ?, 'Pending', ?)",
+                (user_id, username, nom, now)
+            )
+            await db.commit()
 
-        if not event:
-            return await update.message.reply_text("❌ Tidak ada tagihan event aktif.")
+        context.user_data['state'] = None
+        await update.message.reply_text(f"📝 Pengajuan klaim Doorprize senilai <b>{nom:,} Koin</b> telah dikirimkan ke Admin untuk diverifikasi.", reply_markup=InlineKeyboardMarkup([[btn_back()]]), parse_mode="HTML")
 
-        event_id, total_biaya = event
-        async with db.execute("SELECT koin FROM users WHERE user_id = ?", (user_id,)) as cursor:
-            user_row = await cursor.fetchone()
-            user_koin = user_row[0] if user_row else 0
+    # 5. State Request Song
+    elif state == "WAITING_SONG_NAME":
+        async with get_db_connection() as db:
+            await db.execute(
+                "INSERT INTO song_requests (event_id, user_id, username, judul_lagu, status, created_at) VALUES (1, ?, ?, ?, 'Pending', ?)",
+                (user_id, username, text_input, now)
+            )
+            await db.commit()
 
-        if user_koin < total_biaya:
-            return await update.message.reply_text(f"❌ Saldo tidak cukup! Butuh {total_biaya:,} Koin.")
+        context.user_data['state'] = None
+        await update.message.reply_text(f"🎵 Request lagu <b>\"{text_input}\"</b> telah dimasukkan ke daftar antrean Band Pesta!", reply_markup=InlineKeyboardMarkup([[btn_back()]]), parse_mode="HTML")
 
-        await db.execute("UPDATE users SET koin = koin - ? WHERE user_id = ?", (total_biaya, user_id))
-        await db.execute("UPDATE events SET status = 'Paid' WHERE event_id = ?", (event_id,))
-        await db.commit()
+    # 6. State Transfer Koin
+    elif state == "WAITING_TRANSFER_DATA":
+        parts = text_input.split()
+        if len(parts) < 2 or not parts[0].isdigit() or not parts[1].isdigit():
+            return await update.message.reply_text("❌ Format transfer salah! Ketik: `[User_ID] [Jumlah]`")
 
-    await update.message.reply_text(f"✅ Event #{event_id} lunas! Status menjadi **PAID**.", parse_mode="HTML")
+        target_id, amount = int(parts[0]), int(parts[1])
+        async with get_db_connection() as db:
+            async with db.execute("SELECT koin FROM users WHERE user_id = ?", (user_id,)) as cursor:
+                row = await cursor.fetchone()
+                bal = row[0] if row else 0
 
-async def cmd_minta_makan(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    username = update.effective_user.username or update.effective_user.first_name
-    menu = " ".join(context.args).strip() or "Prasmanan Spesial"
-    await update.message.reply_text(f"🍽️ Pramusaji mengantar pesanan makanan <b>\"{menu}\"</b> untuk @{username}!", parse_mode="HTML")
+            if bal < amount:
+                context.user_data['state'] = None
+                return await update.message.reply_text("❌ Saldo koin Anda tidak mencukupi.")
 
-async def cmd_minta_minum(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    username = update.effective_user.username or update.effective_user.first_name
-    minum = " ".join(context.args).strip() or "Mocktail Segar"
-    await update.message.reply_text(f"🥤 Bartender menyajikan minuman <b>\"{minum}\"</b> untuk @{username}. Cheers! 🥂", parse_mode="HTML")
+            await db.execute("UPDATE users SET koin = koin - ? WHERE user_id = ?", (amount, user_id))
+            await db.execute("INSERT INTO users (user_id, koin) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET koin=koin+?", (target_id, amount, amount))
+            await log_koin_transaction(db, user_id, -amount, "TRANSFER_OUT", f"Transfer ke user {target_id}")
+            await log_koin_transaction(db, target_id, amount, "TRANSFER_IN", f"Transfer dari user {user_id}")
+            await db.commit()
 
-async def cmd_photobooth(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    username = update.effective_user.username or update.effective_user.first_name
-    caption = " ".join(context.args).strip() or "Pose Anggun di Resepsi"
+        context.user_data['state'] = None
+        await update.message.reply_text(f"💸 Berhasil mentransfer <b>{amount:,} Koin</b> ke ID <code>{target_id}</code>.", reply_markup=InlineKeyboardMarkup([[btn_back()]]), parse_mode="HTML")
 
-    async with get_db_connection() as db:
-        await db.execute("INSERT INTO photo_gallery (event_id, user_id, username, photo_url, caption) VALUES (1, ?, ?, 'placeholder', ?)", (update.effective_user.id, username, caption))
-        await db.commit()
-
-    await send_to_channel(context, f"📸 <b>PHOTOBOOTH FEED (@RoyalWeddingRP)</b>\n👤 @{username}\n💬 <i>\"{caption}\"</i>")
-    await update.message.reply_text(f"📸 Foto @{username} berhasil masuk galeri dan diposting ke {CHANNEL_ID}!", parse_mode="HTML")
-
-async def cmd_angpao(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    username = update.effective_user.username or update.effective_user.first_name
-    raw = " ".join(context.args)
-
-    if "|" not in raw:
-        return await update.message.reply_text("Format: <code>/angpao [jumlah] | [pesan]</code>", parse_mode="HTML")
-
-    parts = [p.strip() for p in raw.split("|", 1)]
-    jumlah = int(parts[0]) if parts[0].isdigit() else 10000
-    pesan = parts[1]
-    now = int(time.time())
-
-    async with get_db_connection() as db:
-        async with db.execute("SELECT koin FROM users WHERE user_id = ?", (user_id,)) as cursor:
-            row = await cursor.fetchone()
-            bal = row[0] if row else 0
-        if bal < jumlah:
-            return await update.message.reply_text("❌ Saldo koin tidak cukup.")
-        await db.execute("UPDATE users SET koin = koin - ? WHERE user_id = ?", (jumlah, user_id))
-        await db.execute("INSERT INTO angpao (event_id, from_user_id, from_username, jumlah_koin, pesan, created_at) VALUES (1, ?, ?, ?, ?, ?)", (user_id, username, jumlah, pesan, now))
-        await db.commit()
-
-    await send_to_channel(context, f"🎁 <b>ANGPAO & WISHING (@RoyalWeddingRP)</b>\n✉️ Dari: @{username}\n💰 <b>{jumlah:,} Koin</b>\n🕊️ <i>\"{pesan}\"</i>")
-    await update.message.reply_text(f"🎁 Angpao <b>{jumlah:,} Koin</b> berhasil dikirim!", parse_mode="HTML")
-
-async def cmd_bukutamu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    async with get_db_connection() as db:
-        async with db.execute("SELECT from_username, jumlah_koin, pesan FROM angpao WHERE event_id = 1 ORDER BY id DESC LIMIT 10") as cursor:
-            rows = await cursor.fetchall()
-    if not rows:
-        return await update.message.reply_text("📖 Buku tamu kosong.")
-    lines = ["📖 <b>BUKU TAMU & HARAPAN</b>\n"]
-    for u, k, m in rows:
-        lines.append(f"• @{u} (🎁 {k:,} Koin): <i>\"{m}\"</i>")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
-
-async def cmd_request_lagu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    username = update.effective_user.username or update.effective_user.first_name
-    judul = " ".join(context.args).strip()
-    if not judul:
-        return await update.message.reply_text("Format: <code>/request_lagu [Judul Lagu - Penyanyi]</code>", parse_mode="HTML")
-    async with get_db_connection() as db:
-        await db.execute("INSERT INTO song_requests (event_id, user_id, username, judul_lagu) VALUES (1, ?, ?, ?)", (update.effective_user.id, username, judul))
-        await db.commit()
-    await update.message.reply_text(f"🎵 Lagu **\"{judul}\"** masuk antrean band!", parse_mode="HTML")
-
-async def cmd_daftar_lagu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    async with get_db_connection() as db:
-        async with db.execute("SELECT username, judul_lagu, status FROM song_requests WHERE event_id = 1") as cursor:
-            rows = await cursor.fetchall()
-    if not rows:
-        return await update.message.reply_text("🎵 Antrean lagu kosong.")
-    lines = ["🎵 <b>ANTRAN LAGU BAND</b>\n"]
-    for u, l, s in rows:
-        lines.append(f"• {l} (req @{u}) — [{s}]")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
-
-async def cmd_gallery(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    async with get_db_connection() as db:
-        async with db.execute("SELECT username, caption FROM photo_gallery WHERE event_id = 1 ORDER BY id DESC LIMIT 10") as cursor:
-            rows = await cursor.fetchall()
-    if not rows:
-        return await update.message.reply_text("🖼️ Galeri kosong.")
-    lines = ["🖼️ <b>GALERI FOTO</b>\n"]
-    for u, c in rows:
-        lines.append(f"• @{u}: <i>\"{c}\"</i>")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
-
-async def cmd_daily_koin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    now = int(time.time())
-    async with get_db_connection() as db:
-        async with db.execute("SELECT last_daily FROM users WHERE user_id = ?", (user_id,)) as cursor:
-            row = await cursor.fetchone()
-            last = row[0] if row and row[0] else 0
-        if now - last < 86400:
-            return await update.message.reply_text("⏳ Tunjangan harian sudah diklaim hari ini.")
-        await db.execute("UPDATE users SET koin = koin + 50000, last_daily = ? WHERE user_id = ?", (now, user_id))
-        await db.commit()
-    await update.message.reply_text("💵 Klaim koin harian +50,000 berhasil!", parse_mode="HTML")
-
-async def cmd_transfer_koin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if len(context.args) < 2 or not context.args[0].isdigit() or not context.args[1].isdigit():
-        return await update.message.reply_text("Format: <code>/transfer_koin [id] [jumlah]</code>", parse_mode="HTML")
-    target, amount = int(context.args[0]), int(context.args[1])
-    user_id = update.effective_user.id
-    async with get_db_connection() as db:
-        async with db.execute("SELECT koin FROM users WHERE user_id = ?", (user_id,)) as cursor:
-            row = await cursor.fetchone()
-            bal = row[0] if row else 0
-        if bal < amount:
-            return await update.message.reply_text("❌ Saldo tidak cukup.")
-        await db.execute("UPDATE users SET koin = koin - ? WHERE user_id = ?", (amount, user_id))
-        await db.execute("INSERT INTO users (user_id, koin) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET koin=koin+?", (target, amount, amount))
-        await db.commit()
-    await update.message.reply_text(f"💸 Berhasil transfer {amount:,} koin ke `{target}`.", parse_mode="HTML")
-
-async def cmd_doorprize(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    async with get_db_connection() as db:
-        async with db.execute("SELECT username FROM rsvp WHERE event_id = 1 AND status_rsvp = 'hadir'") as cursor:
-            rows = await cursor.fetchall()
-    if not rows:
-        return await update.message.reply_text("🎲 Belum ada tamu hadir.")
-    winner = random.choice(rows)[0]
-    await send_to_channel(context, f"🎲 <b>LUCKY DRAW WINNER (@RoyalWeddingRP)</b>\n🏆 Pemenang Doorprize: @{winner}! Silakan gunakan /klaim_doorprize untuk mencairkan hadiah.")
-    await update.message.reply_text(f"🎲 **Pemenang Doorprize:** @{winner}!", parse_mode="HTML")
-
-async def cmd_mc(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    cmd = update.message.text.split()[0].replace("/", "")
-    resp = {
-        "mc_buka": "🎤 *\"Selamat datang di resepsi pernikahan...\"*",
-        "mc_ijab": "🎤 *\"Prosesi akad nikah dimulai...\"*",
-        "mc_resepsi": "🎤 *\"Selamat datang kedua mempelai di pelaminan!\"*",
-        "mc_sungkem": "🎤 *\"Sesi sungkeman penuh haru...\"*",
-        "mc_tutup": "🎤 *\"Acara selesai, terima kasih!\"*"
-    }
-    await update.message.reply_text(resp.get(cmd, "🎤 MC bersiap."), parse_mode="HTML")
-
-async def cmd_incident(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        return await update.message.reply_text("Format: <code>/incident [hujan|catering_telat|sound_dead]</code>", parse_mode="HTML")
-    inc = {"hujan": "☔ Hujan turun!", "catering_telat": "🍽️ Catering terlambat!", "sound_dead": "🎤 Sound mati!"}
-    await update.message.reply_text(inc.get(context.args[0].lower(), "⚠️ Insiden terjadi!"), parse_mode="HTML")
-
-async def cmd_set_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    async with get_db_connection() as db:
-        if await check_admin_tier(db, update.effective_user.id) < 4:
-            return await update.message.reply_text("🚫 Khusus Owner Utama (Tier 4).")
-        if len(context.args) < 2:
-            return await update.message.reply_text("Format: <code>/set_admin [user_id] [tier]</code>", parse_mode="HTML")
-        await db.execute("INSERT INTO users (user_id, admin_tier) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET admin_tier=?", (int(context.args[0]), int(context.args[1]), int(context.args[1])))
-        await db.commit()
-    await update.message.reply_text("✅ Status admin diperbarui.")
-
-async def cmd_reset_event(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    async with get_db_connection() as db:
-        if await check_admin_tier(db, update.effective_user.id) < 2:
-            return await update.message.reply_text("🚫 Khusus Admin.")
-        await db.execute("DELETE FROM events")
-        await db.execute("DELETE FROM rsvp")
-        await db.execute("DELETE FROM angpao")
-        await db.execute("DELETE FROM claims")
-        await db.commit()
-    await update.message.reply_text("🔄 Data event berhasil direset total.", parse_mode="HTML")
+    # 7. State Order Makanan & Minuman
+    elif state in ("WAITING_CATERING_ORDER", "WAITING_DRINK_ORDER"):
+        is_food = (state == "WAITING_CATERING_ORDER")
+        item_type = "makanan" if is_food else "minuman"
+        
+        context.user_data['state'] = None
+        await update.message.reply_text(
+            f"🍽️ Pramusaji mengantarkan pesanan {item_type} <b>\"{text_input}\"</b> khusus untuk <b>@{username}</b>. Selamat menikmati! ✨",
+            reply_markup=InlineKeyboardMarkup([[btn_back()]]),
+            parse_mode="HTML"
+        )
 
 # ==========================================
-# BUILD APPLICATION & POLLING
+# BUILD APPLICATION & BOT LAUNCH
 # ==========================================
 def build_app():
     app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
     app.add_error_handler(global_error_handler)
 
+    # Command Handler Utama untuk Membuka Menu
     app.add_handler(CommandHandler("start", start))
+
+    # Callback Query Router (Interaksi Tombol Keyboard)
     app.add_handler(CallbackQueryHandler(callback_handler))
 
-    app.add_handler(CommandHandler("buat_event", cmd_buat_event))
-    app.add_handler(CommandHandler("bayar_event", cmd_bayar_event))
-    app.add_handler(CommandHandler("rsvp", cmd_rsvp))
-
-    app.add_handler(CommandHandler("minta_makan", cmd_minta_makan))
-    app.add_handler(CommandHandler("minta_minum", cmd_minta_minum))
-
-    app.add_handler(CommandHandler("angpao", cmd_angpao))
-    app.add_handler(CommandHandler("bukutamu", cmd_bukutamu))
-    app.add_handler(CommandHandler("request_lagu", cmd_request_lagu))
-    app.add_handler(CommandHandler("daftar_lagu", cmd_daftar_lagu))
-    app.add_handler(CommandHandler("photobooth", cmd_photobooth))
-    app.add_handler(CommandHandler("gallery", cmd_gallery))
-    app.add_handler(CommandHandler("daily_koin", cmd_daily_koin))
-    app.add_handler(CommandHandler("transfer_koin", cmd_transfer_koin))
-
-    app.add_handler(CommandHandler("klaim_doorprize", cmd_klaim_doorprize))
-    app.add_handler(CommandHandler("klaim_angpao", cmd_klaim_angpao))
-    app.add_handler(CommandHandler("list_klaim", cmd_list_klaim))
-    app.add_handler(CommandHandler("verifikasi_klaim", cmd_verifikasi_klaim))
-
-    app.add_handler(CommandHandler(["mc_buka", "mc_ijab", "mc_resepsi", "mc_sungkem", "mc_tutup"], cmd_mc))
-
-    app.add_handler(CommandHandler("doorprize", cmd_doorprize))
-    app.add_handler(CommandHandler("set_admin", cmd_set_admin))
-    app.add_handler(CommandHandler("incident", cmd_incident))
-    app.add_handler(CommandHandler("reset_event", cmd_reset_event))
+    # Media & Text Handlers untuk Menerima Input Stateful Pengguna
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo_input))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_input))
 
     return app
 
 def main():
     asyncio.run(init_wedding_db())
     app = build_app()
-    print("🤖 Bot Wedding Organizer & Event RP (@RoyalWeddingRP Linked) Running...")
+    print("🤖 Bot Wedding Organizer & Event RP (@RoyalWeddingRP Linked) Running Successfully...")
     app.run_polling()
 
 if __name__ == "__main__":
