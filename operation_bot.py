@@ -402,17 +402,195 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
             "Di sinilah tempat utama kamu mencari koin tunai untuk memperkaya karaktermu.\n\n"
             "<b>Penjelasan Detail Sub-Fitur:</b>\n"
             "• <b>Bekerja Harian:</b> Bekerja rutin setiap 1 jam sekali. Setiap kali bekerja, staminamu berkurang 15%. Semakin tinggi pangkat mafiamu (G1-G7), gajimu akan makin besar.\n"
-            "• <b>Misi Job Bertingkat:</b> Menjalankan penugasan strategis (seperti penagih utang, perampokan bank, atau penyusupan intel). Misi ini butuh waktu tunggu beberapa jam, tetapi menghasilkan koin sangat besar.\n"
-            "• <b>Aksi Kejahatan Jalanan:</b> Melakukan aksi kejahatan instan seperti mencopet atau mencuri mobil. Hasilnya langsung keluar detik itu juga, namun ada risiko tertangkap polisi dan masuk penjara jika gagal.\n\n"
+            "• <b>Misi Job Bertingkat:</b> Menjalankan penugasan strategis via tombol interaktif tanpa teks menumpuk.\n"
+            "• <b>Aksi Kejahatan Jalanan:</b> Melakukan aksi kejahatan instan via tombol langsung.\n\n"
             "<i>Tekan tombol di bawah untuk mulai beraksi:</i>"
         )
         keyboard = [
             [InlineKeyboardButton("🔨 Bekerja Sekarang (Kerja Harian)", callback_data="opaction_work_exec")],
-            [InlineKeyboardButton("💼 Lihat & Jalankan Misi Job", callback_data="opaction_job_view")],
-            [InlineKeyboardButton("🕵️ Lihat & Eksekusi Aksi Kejahatan", callback_data="opaction_crime_view")],
+            [InlineKeyboardButton("💼 Pilih & Jalankan Misi Job", callback_data="opaction_job_menu")],
+            [InlineKeyboardButton("🕵️ Pilih & Eksekusi Aksi Kejahatan", callback_data="opaction_crime_menu")],
             [InlineKeyboardButton("◀️ Kembali ke Menu Utama", callback_data="opmenu_main")]
         ]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+
+    # ==========================================
+    # SUB-MENU BUTTON: JOB SELECTION
+    # ==========================================
+    elif data == "opaction_job_menu":
+        text = (
+            "💼 <b>PILIH MISI STRATEGIS JOB</b>\n"
+            "──────────────────────────────────────────\n"
+            "Pilih salah satu penugasan di bawah ini sesuai kualifikasi gelar mafiamu:\n\n"
+            "<i>Klik tombol misi di bawah untuk langsung memulainya:</i>"
+        )
+        keyboard = []
+        for code, j in JOBS.items():
+            btn_text = f"[{j['tier']}] {j['name']} ({j['dur']//3600}j)"
+            keyboard.append([InlineKeyboardButton(btn_text, callback_data=f"oprunjob_{code}")])
+        keyboard.append([InlineKeyboardButton("◀️ Kembali ke Menu Pekerjaan", callback_data="opmenu_jobs")])
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+
+    elif data.startswith("oprunjob_"):
+        job_code = data.replace("oprunjob_", "")
+        user_id = update.effective_user.id
+        current_username = update.effective_user.username or update.effective_user.first_name or "TanpaUsername"
+        now_epoch = int(time.time())
+
+        async with get_db_connection() as db:
+            user = await get_or_create_user(db, user_id, current_username)
+            active_job = user[15]
+            job_finish = user[16]
+
+            if user[10] > now_epoch:
+                return await query.edit_message_text("🔒 Anda dalam penjara! Tidak dapat mengeksekusi misi.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Kembali", callback_data="opaction_job_menu")]]), parse_mode="HTML")
+
+            if active_job and job_finish > 0:
+                if now_epoch < job_finish:
+                    rem = job_finish - now_epoch
+                    return await query.edit_message_text(
+                        f"⏳ Sedang menjalankan <b>{JOBS[active_job]['name']}</b>. Selesai dalam <b>{rem//3600}j {(rem%3600)//60}m {rem%60}s</b>.",
+                        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Kembali", callback_data="opaction_job_menu")]]),
+                        parse_mode="HTML"
+                    )
+                else:
+                    j_info = JOBS[active_job]
+                    
+                    if j_info.get("category") == "police" and random.randint(1, 100) <= 20:
+                        jail_until = now_epoch + 7200
+                        await db.execute(
+                            "UPDATE users SET jailed_until = ?, job_active = NULL, job_finish_time = 0 WHERE user_id = ?",
+                            (jail_until, user_id)
+                        )
+                        await db.commit()
+                        return await query.edit_message_text(
+                            f"🚨 <b>PENYAMARAN TERBONGKAR!</b>\n\n"
+                            f"Identitas Anda saat menjalankan <b>{j_info['name']}</b> terendus oleh pembunuh bayaran Cosa Nostra! "
+                            f"Anda berhasil selamat namun ditahan dalam sel isolasi selama 2 jam.",
+                            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Kembali", callback_data="opaction_job_menu")]]),
+                            parse_mode="HTML"
+                        )
+
+                    reward = random.randint(j_info["min"], j_info["max"])
+                    heat_modifier = -5 if j_info.get("category") == "police" else 10
+
+                    await db.execute(
+                        "UPDATE users SET koin = koin + ?, heat = MAX(0, heat + ?), job_active = NULL, job_finish_time = 0 WHERE user_id = ?",
+                        (reward, heat_modifier, user_id)
+                    )
+                    await db.commit()
+
+                    return await query.edit_message_text(
+                        f"🎉 <b>MISI STRATEGIS BERHASIL!</b>\n\n"
+                        f"Anda menyelesaikan <b>{j_info['name']}</b> dan memperoleh imbalan <b>+{reward:,} Koin</b>!",
+                        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Kembali ke Menu Pekerjaan", callback_data="opmenu_jobs")]]),
+                        parse_mode="HTML"
+                    )
+
+            if job_code not in JOBS:
+                return await query.edit_message_text("❌ Kode Job tidak ditemukan!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Kembali", callback_data="opaction_job_menu")]]), parse_mode="HTML")
+
+            j = JOBS[job_code]
+            user_gelar = user[6]
+            user_tier_num = int(user_gelar.replace("G", "")) if user_gelar.startswith("G") else 0
+            req_tier_num = int(j["tier"].replace("G", ""))
+
+            if user_tier_num < req_tier_num:
+                return await query.edit_message_text(f"🔒 <b>AKSES DITOLAK:</b> Misi ini membutuhkan minimal gelar <b>{j['tier']}</b>!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Kembali", callback_data="opaction_job_menu")]]), parse_mode="HTML")
+
+            if user[5] < j["vit"]:
+                return await query.edit_message_text(f"⚡ Vitality tidak cukup! Membutuhkan {j['vit']}% Vitality.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Kembali", callback_data="opaction_job_menu")]]), parse_mode="HTML")
+
+            finish_time = now_epoch + j["dur"]
+            new_vit = user[5] - j["vit"]
+
+            await db.execute(
+                "UPDATE users SET vitality = ?, job_active = ?, job_finish_time = ? WHERE user_id = ?",
+                (new_vit, job_code, finish_time, user_id)
+            )
+            await db.commit()
+
+            await query.edit_message_text(
+                f"🚀 <b>MISI DIMULAI: {j['name']}</b>\n\n"
+                f"Kategori Misi: <b>{j.get('category', 'umum').upper()}</b>\n"
+                f"Durasi: {j['dur']//3600} Jam\n"
+                f"Proyeksi Hasil: {j['min']:,} - {j['max']:,} Koin\n\n"
+                f"Sistem sedang berjalan secara otomatis.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Kembali ke Menu Pekerjaan", callback_data="opmenu_jobs")]]),
+                parse_mode="HTML"
+            )
+
+    # ==========================================
+    # SUB-MENU BUTTON: CRIME SELECTION
+    # ==========================================
+    elif data == "opaction_crime_menu":
+        text = (
+            "🕵️ <b>PILIH AKSI KEJAHATAN TAKTIS</b>\n"
+            "──────────────────────────────────────────\n"
+            "Pilih aksi kejahatan langsung di bawah ini (Hasil instan, namun berisiko masuk sel):\n\n"
+        )
+        keyboard = []
+        for code, c in CRIMES.items():
+            btn_text = f"🎭 {c['desc']} ({c['risk']}% Risiko)"
+            keyboard.append([InlineKeyboardButton(btn_text, callback_data=f"opruncrime_{code}")])
+        keyboard.append([InlineKeyboardButton("◀️ Kembali ke Menu Pekerjaan", callback_data="opmenu_jobs")])
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+
+    elif data.startswith("opruncrime_"):
+        crime_code = data.replace("opruncrime_", "")
+        user_id = update.effective_user.id
+        current_username = update.effective_user.username or update.effective_user.first_name or "TanpaUsername"
+        now_epoch = int(time.time())
+
+        async with get_db_connection() as db:
+            user = await get_or_create_user(db, user_id, current_username)
+
+            if user[10] > now_epoch:
+                return await query.edit_message_text("🔒 Anda sedang mendekam di sel penjara!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Kembali", callback_data="opaction_crime_menu")]]), parse_mode="HTML")
+
+            if crime_code not in CRIMES:
+                return await query.edit_message_text("❌ Kode aksi kejahatan tidak valid.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Kembali", callback_data="opaction_crime_menu")]]), parse_mode="HTML")
+
+            c = CRIMES[crime_code]
+            user_heat = user[7]
+            
+            effective_risk = min(95, c["risk"] + int(user_heat * 0.5))
+
+            if random.randint(1, 100) <= effective_risk:
+                jail_until = now_epoch + c["jail"]
+                fine = c["min"] // 2
+
+                await db.execute(
+                    "UPDATE users SET koin = MAX(0, koin - ?), heat = heat + ?, jailed_until = ? WHERE user_id = ?",
+                    (fine, c["heat"], jail_until, user_id)
+                )
+                await db.commit()
+
+                return await query.edit_message_text(
+                    f"🚨 <b>AKSI GAGAL! TERTANGKAP POLISI</b>\n\n"
+                    f"Risiko Efektif Terdeteksi: <b>{effective_risk}%</b> (Heat Penalty: +{int(user_heat * 0.5)}%)\n"
+                    f"Denda Disita: -{fine:,} Koin\n"
+                    f"Heat Bertambah: +{c['heat']}\n"
+                    f"Mendekam di Penjara: {c['jail']//3600} Jam",
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Kembali ke Menu Pekerjaan", callback_data="opmenu_jobs")]]),
+                    parse_mode="HTML"
+                )
+
+            loot = random.randint(c["min"], c["max"])
+            await db.execute(
+                "UPDATE users SET koin = koin + ?, heat = heat + ?, respect = respect + 10 WHERE user_id = ?",
+                (loot, c["heat"] // 2, user_id)
+            )
+            await db.commit()
+
+            await query.edit_message_text(
+                f"🎭 <b>AKSI KEJAHATAN SUKSES!</b>\n\n"
+                f"Hasil Rampokan: <b>+{loot:,} Koin</b>\n"
+                f"Respect Bertambah: +10\n"
+                f"Heat Level: +{c['heat']//2}",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Kembali ke Menu Pekerjaan", callback_data="opmenu_jobs")]]),
+                parse_mode="HTML"
+            )
 
     elif data == "opmenu_career":
         text = (
@@ -429,11 +607,66 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
         )
         keyboard = [
             [InlineKeyboardButton("📋 Cek Profil Karir Saya", callback_data="opaction_career_exec")],
+            [InlineKeyboardButton("📑 Pilih / Ganti Jalur Karir", callback_data="opaction_choose_career_menu")],
             [InlineKeyboardButton("🎖️ Cek Lencana Pangkat", callback_data="opaction_badge_exec")],
             [InlineKeyboardButton("🚔 Jalankan Patroli Polisi", callback_data="opaction_patrol_exec")],
             [InlineKeyboardButton("◀️ Kembali ke Menu Utama", callback_data="opmenu_main")]
         ]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+
+    # ==========================================
+    # SUB-MENU BUTTON: CAREER SELECTION
+    # ==========================================
+    elif data == "opaction_choose_career_menu":
+        text = (
+            "📋 <b>PILIH JALUR KARIR RESMI</b>\n"
+            "──────────────────────────────────────────\n"
+            "Silakan pilih salah satu jalur karir publik di bawah ini menggunakan tombol interaktif:\n\n"
+            "• <b>Police</b> — Penegak Hukum & Pemburu Buronan\n"
+            "• <b>Lawyer</b> — Pengacara & Penjamin Tahanan\n"
+            "• <b>Judge</b> — Hakim Agung Pemutus Vonis\n"
+            "• <b>Politician</b> — Pejabat Publik & Kebijakan\n"
+            "• <b>Journalist</b> — Jurnalis Investigasi & Audit\n\n"
+            "<i>Catatan: Khusus pemain non-mafia (Gelar G0).</i>"
+        )
+        keyboard = [
+            [InlineKeyboardButton("👮 Police", callback_data="opsetcareer_police"), InlineKeyboardButton("⚖️ Lawyer", callback_data="opsetcareer_lawyer")],
+            [InlineKeyboardButton("⚖️ Judge", callback_data="opsetcareer_judge"), InlineKeyboardButton("🏛️ Politician", callback_data="opsetcareer_politician")],
+            [InlineKeyboardButton("📰 Journalist", callback_data="opsetcareer_journalist")],
+            [InlineKeyboardButton("◀️ Kembali ke Menu Karir", callback_data="opmenu_career")]
+        ]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+
+    elif data.startswith("opsetcareer_"):
+        selected = data.replace("opsetcareer_", "")
+        user_id = update.effective_user.id
+        current_username = update.effective_user.username or update.effective_user.first_name or "TanpaUsername"
+        
+        async with get_db_connection() as db:
+            user = await get_or_create_user(db, user_id, current_username)
+            gelar_tier = user[6]
+
+            if gelar_tier != "G0":
+                return await query.edit_message_text(
+                    "🚫 <b>KONFLIK KEPENTINGAN DITOLAK!</b>\n\n"
+                    f"Anda sudah memegang gelar Sindikat Mafia (<b>{gelar_tier}</b>). "
+                    "Petinggi kartel tidak dapat merangkap jabatan sebagai Penegak Hukum publik!",
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Kembali ke Menu Karir", callback_data="opmenu_career")]]),
+                    parse_mode="HTML"
+                )
+
+            await db.execute("UPDATE users SET career_track = ?, career_rank = 0 WHERE user_id = ?", (selected, user_id))
+            await db.commit()
+            
+            title = get_rank_title(selected, 0)
+            await query.edit_message_text(
+                f"📑 <b>PELANTIKAN KARIR PUBLIK BERHASIL!</b>\n\n"
+                f"Jalur Karir  : <b>{selected.upper()}</b>\n"
+                f"Pangkat Awal : <b>{title}</b> (Rank 0)\n\n"
+                f"Laksanakan tugas operasional Anda untuk menaikkan pangkat!",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Kembali ke Menu Karir", callback_data="opmenu_career")]]),
+                parse_mode="HTML"
+            )
 
     elif data == "opmenu_targets":
         text = (
@@ -507,39 +740,40 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
     # ==========================================
     elif data == "opaction_rekening_exec":
         fake_update = Update(update.update_id, message=query.message)
+        fake_update._effective_user = update.effective_user
         await cmd_rekening(fake_update, context)
     elif data == "opaction_daily_exec":
         fake_update = Update(update.update_id, message=query.message)
+        fake_update._effective_user = update.effective_user
         await cmd_daily(fake_update, context)
     elif data == "opaction_bribe_exec":
         fake_update = Update(update.update_id, message=query.message)
+        fake_update._effective_user = update.effective_user
         await cmd_bribe(fake_update, context)
     elif data == "opaction_work_exec":
         fake_update = Update(update.update_id, message=query.message)
+        fake_update._effective_user = update.effective_user
         await cmd_work(fake_update, context)
-    elif data == "opaction_job_view":
-        fake_update = Update(update.update_id, message=query.message)
-        context.args = []
-        await cmd_job(fake_update, context)
-    elif data == "opaction_crime_view":
-        fake_update = Update(update.update_id, message=query.message)
-        context.args = []
-        await cmd_crime(fake_update, context)
     elif data == "opaction_career_exec":
         fake_update = Update(update.update_id, message=query.message)
+        fake_update._effective_user = update.effective_user
         context.args = []
         await cmd_career(fake_update, context)
     elif data == "opaction_badge_exec":
         fake_update = Update(update.update_id, message=query.message)
+        fake_update._effective_user = update.effective_user
         await cmd_badge(fake_update, context)
     elif data == "opaction_patrol_exec":
         fake_update = Update(update.update_id, message=query.message)
+        fake_update._effective_user = update.effective_user
         await cmd_patrol(fake_update, context)
     elif data == "opaction_wanted_exec":
         fake_update = Update(update.update_id, message=query.message)
+        fake_update._effective_user = update.effective_user
         await cmd_wanted(fake_update, context)
     elif data == "opaction_crew_exec":
         fake_update = Update(update.update_id, message=query.message)
+        fake_update._effective_user = update.effective_user
         context.args = []
         await cmd_crew(fake_update, context)
 
@@ -672,7 +906,7 @@ async def cmd_career(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Jalur Karir  : <b>{track.upper()}</b>\n"
             f"Pangkat/Rank : <b>{title}</b> (Rank {rank}){stat_info}\n"
             f"──────────────────────────────\n"
-            f"<i>Gunakan '/career choose [track]' jika ingin beralih profesi (Khusus non-mafia G0).</i>"
+            f"<i>Gunakan menu interaktif karir untuk beralih profesi secara praktis (Khusus non-mafia G0).</i>"
         )
         await update.message.reply_text(text, parse_mode="HTML")
 
@@ -1086,165 +1320,42 @@ async def cmd_daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"🎁 <b>TUNJANGAN HARIAN:</b> Anda mendapatkan <b>+{reward:,} Koin</b>!", parse_mode="HTML")
 
 async def cmd_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    args = context.args
     user_id = update.effective_user.id
     current_username = update.effective_user.username or update.effective_user.first_name or "TanpaUsername"
-    now_epoch = int(time.time())
 
     async with get_db_connection() as db:
-        user = await get_or_create_user(db, user_id, current_username)
-        active_job = user[15]
-        job_finish = user[16]
+        await get_or_create_user(db, user_id, current_username)
 
-        if user[10] > now_epoch:
-            return await update.message.reply_text("🔒 Anda dalam penjara! Tidak dapat mengeksekusi misi.")
-
-        if active_job and job_finish > 0:
-            if now_epoch < job_finish:
-                rem = job_finish - now_epoch
-                return await update.message.reply_text(
-                    f"⏳ Sedang menjalankan <b>{JOBS[active_job]['name']}</b>. Selesai dalam <b>{rem//3600}j {(rem%3600)//60}m {rem%60}s</b>.",
-                    parse_mode="HTML"
-                )
-            else:
-                j_info = JOBS[active_job]
-                
-                if j_info.get("category") == "police" and random.randint(1, 100) <= 20:
-                    jail_until = now_epoch + 7200
-                    await db.execute(
-                        "UPDATE users SET jailed_until = ?, job_active = NULL, job_finish_time = 0 WHERE user_id = ?",
-                        (jail_until, user_id)
-                    )
-                    await db.commit()
-                    return await update.message.reply_text(
-                        f"🚨 <b>PENYAMARAN TERBONGKAR!</b>\n\n"
-                        f"Identitas Anda saat menjalankan <b>{j_info['name']}</b> terendus oleh pembunuh bayaran Cosa Nostra! "
-                        f"Anda berhasil selamat namun ditahan dalam sel isolasi selama 2 jam.",
-                        parse_mode="HTML"
-                    )
-
-                reward = random.randint(j_info["min"], j_info["max"])
-                heat_modifier = -5 if j_info.get("category") == "police" else 10
-
-                await db.execute(
-                    "UPDATE users SET koin = koin + ?, heat = MAX(0, heat + ?), job_active = NULL, job_finish_time = 0 WHERE user_id = ?",
-                    (reward, heat_modifier, user_id)
-                )
-                await db.commit()
-
-                return await update.message.reply_text(
-                    f"🎉 <b>MISI STRATEGIS BERHASIL!</b>\n\n"
-                    f"Anda menyelesaikan <b>{j_info['name']}</b> dan memperoleh imbalan <b>+{reward:,} Koin</b>!",
-                    parse_mode="HTML"
-                )
-
-        if not args:
-            text = "💼 <b>DAFTAR MISI JOB & INTRIK POLISI-MAFIA</b>\n\nGunakan <code>/job [job_code]</code> untuk menjalankan penugasan:\n\n"
-            text += "<b>🔴 MISI OPERASIONAL COSA NOSTRA:</b>\n"
-            for code, j in JOBS.items():
-                if j.get("category") == "mafia":
-                    text += f"• <code>[{code}]</code> <b>{j['name']}</b> ({j['tier']}+)\n  Durasi: {j['dur']//3600}j | Hasil: {j['min']:,}-{j['max']:,} Koin\n"
-            
-            text += "\n<b>🔵 MISI INTRIK & PENYAMARAN POLISI:</b>\n"
-            for code, j in JOBS.items():
-                if j.get("category") == "police":
-                    text += f"• <code>[{code}]</code> <b>{j['name']}</b> ({j['tier']}+)\n  Durasi: {j['dur']//3600}j | Hasil: {j['min']:,}-{j['max']:,} Koin\n"
-
-            return await update.message.reply_text(text, parse_mode="HTML")
-
-        job_code = args[0].lower()
-        if job_code not in JOBS:
-            return await update.message.reply_text("❌ Kode Job tidak ditemukan!")
-
-        j = JOBS[job_code]
-        user_gelar = user[6]
-        user_tier_num = int(user_gelar.replace("G", "")) if user_gelar.startswith("G") else 0
-        req_tier_num = int(j["tier"].replace("G", ""))
-
-        if user_tier_num < req_tier_num:
-            return await update.message.reply_text(f"🔒 <b>AKSES DITOLAK:</b> Misi ini membutuhkan minimal gelar <b>{j['tier']}</b>!", parse_mode="HTML")
-
-        if user[5] < j["vit"]:
-            return await update.message.reply_text(f"⚡ Vitality tidak cukup! Membutuhkan {j['vit']}% Vitality.")
-
-        finish_time = now_epoch + j["dur"]
-        new_vit = user[5] - j["vit"]
-
-        await db.execute(
-            "UPDATE users SET vitality = ?, job_active = ?, job_finish_time = ? WHERE user_id = ?",
-            (new_vit, job_code, finish_time, user_id)
-        )
-        await db.commit()
-
-        await update.message.reply_text(
-            f"🚀 <b>MISI DIMULAI: {j['name']}</b>\n\n"
-            f"Kategori Misi: <b>{j.get('category', 'umum').upper()}</b>\n"
-            f"Durasi: {j['dur']//3600} Jam\n"
-            f"Proyeksi Hasil: {j['min']:,} - {j['max']:,} Koin\n"
-            f"Ketik <code>/job</code> kembali setelah durasi selesai untuk mengambil hasil.",
-            parse_mode="HTML"
-        )
+    text = (
+        "💼 <b>PILIH MISI STRATEGIS JOB</b>\n"
+        "──────────────────────────────────────────\n"
+        "Gunakan tombol di bawah untuk memilih & menjalankan misi tanpa perlu mengetik kode:"
+    )
+    keyboard = []
+    for code, j in JOBS.items():
+        btn_text = f"[{j['tier']}] {j['name']} ({j['dur']//3600}j)"
+        keyboard.append([InlineKeyboardButton(btn_text, callback_data=f"oprunjob_{code}")])
+    keyboard.append([InlineKeyboardButton("◀️ Kembali ke Menu Utama", callback_data="opmenu_main")])
+    await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
 async def cmd_crime(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    args = context.args
     user_id = update.effective_user.id
     current_username = update.effective_user.username or update.effective_user.first_name or "TanpaUsername"
-    now_epoch = int(time.time())
 
     async with get_db_connection() as db:
-        user = await get_or_create_user(db, user_id, current_username)
+        await get_or_create_user(db, user_id, current_username)
 
-        if user[10] > now_epoch:
-            return await update.message.reply_text("🔒 Anda sedang mendekam di sel penjara!")
-
-        if not args:
-            text = "🕵️ <b>DAFTAR AKSI KEJAHATAN TAKTIS</b>\n\nGunakan <code>/crime [crime_code]</code>:\n\n"
-            for code, c in CRIMES.items():
-                text += f"• <code>[{code}]</code> <b>{c['desc']}</b>\n  Hasil: {c['min']:,}-{c['max']:,} Koin | Risiko Dasar: {c['risk']}%\n"
-            return await update.message.reply_text(text, parse_mode="HTML")
-
-        crime_code = args[0].lower()
-        if crime_code not in CRIMES:
-            return await update.message.reply_text("❌ Kode aksi kejahatan tidak valid.")
-
-        c = CRIMES[crime_code]
-        user_heat = user[7]
-        
-        effective_risk = min(95, c["risk"] + int(user_heat * 0.5))
-
-        if random.randint(1, 100) <= effective_risk:
-            jail_until = now_epoch + c["jail"]
-            fine = c["min"] // 2
-
-            await db.execute(
-                "UPDATE users SET koin = MAX(0, koin - ?), heat = heat + ?, jailed_until = ? WHERE user_id = ?",
-                (fine, c["heat"], jail_until, user_id)
-            )
-            await db.commit()
-
-            return await update.message.reply_text(
-                f"🚨 <b>AKSI GAGAL! TERTANGKAP POLISI</b>\n\n"
-                f"Risiko Efektif Terdeteksi: <b>{effective_risk}%</b> (Heat Penalty: +{int(user_heat * 0.5)}%)\n"
-                f"Denda Disita: -{fine:,} Koin\n"
-                f"Heat Bertambah: +{c['heat']}\n"
-                f"Mendekam di Penjara: {c['jail']//3600} Jam",
-                parse_mode="HTML"
-            )
-
-        loot = random.randint(c["min"], c["max"])
-        await db.execute(
-            "UPDATE users SET koin = koin + ?, heat = heat + ?, respect = respect + 10 WHERE user_id = ?",
-            (loot, c["heat"] // 2, user_id)
-        )
-        await db.commit()
-
-        await update.message.reply_text(
-            f"🎭 <b>AKSI KEJAHATAN SUKSES!</b>\n\n"
-            f"Hasil Rampokan: <b>+{loot:,} Koin</b>\n"
-            f"Respect Bertambah: +10\n"
-            f"Heat Level: +{c['heat']//2}",
-            parse_mode="HTML"
-        )
+    text = (
+        "🕵️ <b>PILIH AKSI KEJAHATAN TAKTIS</b>\n"
+        "──────────────────────────────────────────\n"
+        "Gunakan tombol di bawah untuk mengeksekusi aksi kejahatan langsung:"
+    )
+    keyboard = []
+    for code, c in CRIMES.items():
+        btn_text = f"🎭 {c['desc']} ({c['risk']}% Risiko)"
+        keyboard.append([InlineKeyboardButton(btn_text, callback_data=f"opruncrime_{code}")])
+    keyboard.append([InlineKeyboardButton("◀️ Kembali ke Menu Utama", callback_data="opmenu_main")])
+    await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
 async def cmd_bribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -1659,8 +1770,7 @@ def build_app():
 
     # Public Navigation & Callback Handlers
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(menu_callback_handler, pattern="^opmenu_"))
-    app.add_handler(CallbackQueryHandler(menu_callback_handler, pattern="^opaction_"))
+    app.add_handler(CallbackQueryHandler(menu_callback_handler, pattern="^(opmenu_|opaction_|oprunjob_|opruncrime_|opsetcareer_)"))
 
     # Public Operations Commands
     app.add_handler(CommandHandler("rekening", cmd_rekening))
@@ -1702,6 +1812,7 @@ def build_app():
     return app
 
 def main():
+    import asyncio
     asyncio.run(init_db())
     app = build_app()
     print("⚔️ Telegram Cosa Nostra Operations Bot Running...")
