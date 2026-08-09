@@ -216,7 +216,7 @@ async def get_or_create_user(db, user_id: int, username: str):
 # KATALOG ITEM & BLACKMARKET
 # ==========================================
 CATALOG = {
-    # MAKANAN (F1-F12)
+    # MAKANAN
     "F1": {"name": "Panini Salami", "type": "food", "price": 500, "vit": 20, "desc": "Sandwich klasik Italia"},
     "F2": {"name": "Pasta Carbonara", "type": "food", "price": 800, "vit": 25, "desc": "Pasta creamy dengan bacon & keju"},
     "F3": {"name": "Risotto Truffle", "type": "food", "price": 2000, "vit": 40, "desc": "Risotto premium dengan truffle asli"},
@@ -230,7 +230,7 @@ CATALOG = {
     "F11": {"name": "Gelato Sicilian", "type": "food", "price": 400, "vit": 18, "desc": "Es krim segar khas Sisilia"},
     "F12": {"name": "Prosciutto e Melone", "type": "food", "price": 1800, "vit": 38, "desc": "Hidangan pembuka ham & melon"},
 
-    # MINUMAN (D1-D12)
+    # MINUMAN
     "D1": {"name": "Espresso Italian", "type": "drink", "price": 300, "vit": 15, "desc": "Kopi espresso murni"},
     "D2": {"name": "Cappuccino Premium", "type": "drink", "price": 600, "vit": 20, "desc": "Cappuccino foam lembut"},
     "D3": {"name": "Whiskey Scotch 18Y", "type": "drink", "price": 2000, "vit": 35, "desc": "Whiskey aged 18 tahun"},
@@ -244,7 +244,7 @@ CATALOG = {
     "D11": {"name": "Limoncello Tradizionale", "type": "drink", "price": 900, "vit": 24, "desc": "Liqueur lemon khas Italia Selatan"},
     "D12": {"name": "Cognac Hennessy XO", "type": "drink", "price": 4800, "vit": 50, "desc": "Cognac kelas tinggi beraroma kayu oak"},
 
-    # SENJATA (W1-W14)
+    # SENJATA
     "W1": {"name": "Pistol 9MM", "type": "weapon", "price": 5000, "desc": "Entry-level senjata"},
     "W2": {"name": "Revolver .45", "type": "weapon", "price": 8000, "desc": "Powerful handgun"},
     "W3": {"name": "Shotgun Combat", "type": "weapon", "price": 15000, "desc": "Heavy damage"},
@@ -260,7 +260,7 @@ CATALOG = {
     "W13": {"name": "Submachine Gun Tommy Gun", "type": "weapon", "price": 32000, "desc": "Senjata ikonik para gangster mafia klasik"},
     "W14": {"name": "Kevlar Stun Baton", "type": "weapon", "price": 6000, "desc": "Tongkat kejut taktis non-lethal penegak hukum"},
 
-    # ARMOR (A1-A12)
+    # ARMOR
     "A1": {"name": "Leather Jacket", "type": "armor", "price": 3000, "desc": "Jaket kulit mafia"},
     "A2": {"name": "Kevlar Vest", "type": "armor", "price": 10000, "desc": "Tactical kevlar"},
     "A3": {"name": "Police Riot Gear", "type": "armor", "price": 12000, "desc": "Gear bekas polisi"},
@@ -274,7 +274,7 @@ CATALOG = {
     "A11": {"name": "Royal Guard Armor", "type": "armor", "price": 80000, "desc": "Armor legendaris"},
     "A12": {"name": "Ballistic Shield Elite", "type": "armor", "price": 28000, "desc": "Perisai portabel pelindung regu penyergap"},
 
-    # PERHIASAN (J1-J16)
+    # PERHIASAN
     "J1": {"name": "Silver Ring", "type": "jewelry", "price": 2000, "desc": "Cincin perak murni"},
     "J2": {"name": "Gold Chain", "type": "jewelry", "price": 5000, "desc": "Rantai emas murni"},
     "J3": {"name": "Diamond Earring", "type": "jewelry", "price": 12000, "desc": "Anting berlian"},
@@ -292,7 +292,7 @@ CATALOG = {
     "J15": {"name": "Papal Ring Legendary", "type": "jewelry", "price": 500000, "desc": "Cincin bersejarah agung"},
     "J16": {"name": "Black Diamond Brooch", "type": "jewelry", "price": 270000, "desc": "Bros berlian hitam langka"},
 
-    # PROPERTI (H1-H13)
+    # PROPERTI
     "H1": {"name": "Apartment Downtown", "type": "property", "price": 50000, "passive": 500, "desc": "Apartemen pusat kota"},
     "H2": {"name": "Suburban House", "type": "property", "price": 100000, "passive": 1000, "desc": "Rumah pinggiran kota"},
     "H3": {"name": "Luxury Villa", "type": "property", "price": 250000, "passive": 2500, "desc": "Villa mewah kolam renang"},
@@ -307,7 +307,7 @@ CATALOG = {
     "H12": {"name": "Royal Palace", "type": "property", "price": 3000000, "passive": 20000, "desc": "Istana megah megah"},
     "H13": {"name": "Subterranean Safehouse", "type": "property", "price": 950000, "passive": 11000, "desc": "Bunker rahasia bawah tanah dengan sistem pemantauan otomatis"},
 
-    # KENDARAAN (V1-V15)
+    # KENDARAAN
     "V1": {"name": "Scooter 125cc", "type": "vehicle", "price": 30000, "passive": 100, "desc": "Skuter hemat energi"},
     "V2": {"name": "Sedan Classic", "type": "vehicle", "price": 60000, "passive": 250, "desc": "Sedan hitam standar mafia"},
     "V3": {"name": "SUV Armored", "type": "vehicle", "price": 150000, "passive": 600, "desc": "SUV anti-peluru"},
@@ -324,7 +324,7 @@ CATALOG = {
     "V14": {"name": "Koenigsegg Hypercar", "type": "vehicle", "price": 2000000, "passive": 5000, "desc": "Hypercar tercepat"},
     "V15": {"name": "Tactical Interceptor Patrol", "type": "vehicle", "price": 350000, "passive": 1400, "desc": "Mobil patroli taktis kecepatan tinggi berspesifikasi khusus"},
 
-    # SERAGAM (S1-S8)
+    # SERAGAM
     "S1": {"name": "Casual Street", "type": "suit", "price": 10000, "desc": "Pakaian jalanan biasa"},
     "S2": {"name": "Business Formal", "type": "suit", "price": 25000, "desc": "Jas bisnis formal"},
     "S3": {"name": "Tactical Combat", "type": "suit", "price": 40000, "desc": "Seragam tempur taktis"},
@@ -334,7 +334,7 @@ CATALOG = {
     "S7": {"name": "Don Signature Suit", "type": "suit", "price": 150000, "desc": "Setelan khas Godfather"},
     "S8": {"name": "Diplomatic Gala Attire", "type": "suit", "price": 120000, "desc": "Setelan gaun/jas khusus jamuan tinggi pejabat kenegaraan"},
 
-    # GELAR PANGKAT (G1-G7)
+    # GELAR PANGKAT
     "G1": {"name": "Made Man", "type": "gelar", "price": 5000, "desc": "Tier 1: Anggota resmi keluarga"},
     "G2": {"name": "Enforcer Primus", "type": "gelar", "price": 20000, "desc": "Tier 2: Eksekutor utama"},
     "G3": {"name": "Capo Regime", "type": "gelar", "price": 75000, "desc": "Tier 3: Kapten wilayah"},
@@ -343,7 +343,7 @@ CATALOG = {
     "G6": {"name": "Caporegime Supremo", "type": "gelar", "price": 1000000, "desc": "Tier 6: Komandan tertinggi"},
     "G7": {"name": "Don / Donna Famiglia", "type": "gelar", "price": 2500000, "desc": "Tier 7: Penguasa puncak"},
 
-    # BISNIS (B1-B14)
+    # BISNIS
     "B1": {"name": "Kedai Kopi", "type": "business", "price": 10000, "passive": 300, "desc": "Kedai kopi pencuci uang"},
     "B2": {"name": "Toko Pakaian", "type": "business", "price": 30000, "passive": 800, "desc": "Boutique formal"},
     "B3": {"name": "Bar & Lounge", "type": "business", "price": 70000, "passive": 2000, "desc": "Tempat hiburan malam"},
@@ -476,16 +476,16 @@ async def process_buy_item(user_id: int, username: str, code: str) -> str:
                 already_owned = await cursor.fetchone()
 
             if already_owned:
-                return f"❌ <b>PEMBELIAN DITOLAK:</b> Anda sudah pernah membeli gelar <b>{item['name']} ({code})</b>."
+                return f"❌ <b>PEMBELIAN DITOLAK:</b> Anda sudah pernah membeli gelar <b>{item['name']}</b>."
 
             current_tier_num = int(current_gelar.replace("G", "")) if current_gelar and current_gelar.startswith("G") else 0
             target_tier_num = int(code.replace("G", ""))
 
             if target_tier_num <= current_tier_num:
-                return f"❌ <b>PEMBELIAN DITOLAK:</b> Gelar Anda saat ini (<b>{current_gelar}</b>) sudah setara atau lebih tinggi dari <b>{code}</b>."
+                return f"❌ <b>PEMBELIAN DITOLAK:</b> Gelar Anda saat ini (<b>{current_gelar}</b>) sudah setara atau lebih tinggi."
 
         if user_koin < price:
-            return f"❌ Saldo Koin Anda tidak cukup! Harga: {price:,} Koin (Saldo: {user_koin:,} Koin)"
+            return f"❌ Saldo Koin Anda tidak cukup!\nHarga: {price:,} Koin (Saldo Anda: {user_koin:,} Koin)"
 
         new_koin = user_koin - price
 
@@ -496,7 +496,7 @@ async def process_buy_item(user_id: int, username: str, code: str) -> str:
             await db.commit()
             return (
                 f"🍽️ <b>KONSUMSI BERHASIL</b>\n\n"
-                f"Item: <b>[{code}] {item['name']}</b>\n"
+                f"Item: <b>{item['name']}</b>\n"
                 f"Harga: {price:,} Koin\n"
                 f"Vitality Bertambah: +{vit_gain}% (Sisa Vitality: <b>{new_vit}%</b>)\n"
                 f"Sisa Saldo: {new_koin:,} Koin"
@@ -522,7 +522,7 @@ async def process_buy_item(user_id: int, username: str, code: str) -> str:
 
     return (
         f"✅ <b>TRANSAKSI BERHASIL</b>\n\n"
-        f"Item: <b>[{code}] {item['name']}</b>\n"
+        f"Item: <b>{item['name']}</b>\n"
         f"Harga: {price:,} Koin\n"
         f"Sisa Saldo: {new_koin:,} Koin\n"
         f"Certificate ID: <code>{cert_num}</code>"
@@ -565,7 +565,7 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
             "🛍️ <b>PUSAT COSA NOSTRA SHOP & KATALOG BARANG</b>\n\n"
             "Tempat membeli perlengkapan, makanan pemulih stamina, properti penghasil koin pasif, hingga gelar mafia.\n\n"
             "<b>Cara Membeli Barang:</b>\n"
-            "Klik salah satu kategori di bawah ini, lalu pilih barang yang ingin kamu beli langsung dengan mengeklik tombolnya.\n\n"
+            "Klik salah satu kategori di bawah ini, lalu pilih nama barang yang ingin kamu beli.\n\n"
             "<i>Silakan pilih kategori barang:</i>"
         )
         await query.edit_message_text(text, reply_markup=get_shop_category_keyboard(), parse_mode="HTML")
@@ -574,7 +574,7 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
         category = data.replace("vcat_", "")
         if category in CATEGORIES_MAP:
             codes = CATEGORIES_MAP[category]
-            text = f"🛍️ <b>KATALOG BARANG: {category.upper()}</b>\n\nKlik tombol barang di bawah ini untuk langsung membelinya:\n\n"
+            text = f"🛍️ <b>KATALOG BARANG: {category.upper()}</b>\n\nPilih barang yang ingin kamu beli di bawah ini:\n\n"
             keyboard = []
             for code in codes:
                 item = CATALOG[code]
@@ -584,12 +584,42 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
                 elif "passive" in item:
                     extra_info = f" (+{item['passive']:,}/hari)"
 
-                text += f"• <b>[{code}] {item['name']}</b> — {item['price']:,} Koin{extra_info}\n  <i>{item['desc']}</i>\n\n"
+                text += f"• <b>{item['name']}</b> — {item['price']:,} Koin{extra_info}\n  <i>{item['desc']}</i>\n\n"
                 
-                btn_label = f"🛒 Beli [{code}] {item['name']} ({item['price']:,} Koin)"
-                keyboard.append([InlineKeyboardButton(btn_label, callback_data=f"vbuy_{code}")])
+                # Tombol disederhanakan hanya menggunakan nama item agar rapi
+                btn_label = f"🛒 Beli {item['name']}"
+                keyboard.append([InlineKeyboardButton(btn_label, callback_data=f"vconfirm_{code}")])
 
             keyboard.append([InlineKeyboardButton("◀️ Kembali ke Katalog Shop", callback_data="vmenu_shop")])
+            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+
+    # ==========================================
+    # POPUP / TAMPILAN KONFIRMASI PEMBELIAN
+    # ==========================================
+    elif data.startswith("vconfirm_"):
+        code = data.replace("vconfirm_", "")
+        if code in CATALOG:
+            item = CATALOG[code]
+            category_key = next((cat for cat, item_list in CATEGORIES_MAP.items() if code in item_list), "makanan")
+            
+            extra_info = ""
+            if item["type"] in ["food", "drink"]:
+                extra_info = f"\n⚡ Pemulihan Vitality: <b>+{item.get('vit', 0)}%</b>"
+            elif "passive" in item:
+                extra_info = f"\n💵 Hasil Pasif Harian: <b>+{item['passive']:,} Koin/hari</b>"
+
+            text = (
+                f"🛒 <b>KONFIRMASI PEMBELIAN BARANG</b>\n\n"
+                f"Nama Item: <b>{item['name']}</b>\n"
+                f"Harga Resmi: <b>{item['price']:,} Koin</b>{extra_info}\n"
+                f"Deskripsi: <i>{item['desc']}</i>\n\n"
+                f"Apakah Anda yakin ingin menyelesaikan transaksi ini?"
+            )
+            
+            keyboard = [
+                [InlineKeyboardButton("✅ Ya, Beli Sekarang", callback_data=f"vbuy_{code}")],
+                [InlineKeyboardButton("❌ Batal", callback_data=f"vcat_{category_key}")]
+            ]
             await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
     elif data.startswith("vbuy_"):
@@ -1196,7 +1226,7 @@ async def cmd_portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 name = item_info.get("name", code)
                 
                 date_str = datetime.fromtimestamp(acquired_at, tz=WIB).strftime("%Y-%m-%d") if acquired_at else "N/A"
-                text += f"• <b>[{code}] {name}</b>\n  └ Cert: <code>{cert}</code> | <i>{date_str}</i>\n"
+                text += f"• <b>{name}</b>\n  └ Cert: <code>{cert}</code> | <i>{date_str}</i>\n"
 
         await update.message.reply_text(text, parse_mode="HTML")
 
@@ -1216,7 +1246,7 @@ async def cmd_certificate(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = (
             f"📜 <b>COSA NOSTRA PROPERTY CERTIFICATE</b>\n\n"
             f"ID: <code>{cert_num}</code>\n"
-            f"Asset: <b>[{code}] {name}</b>\n"
+            f"Asset: <b>{name}</b>\n"
             f"Owner ID: <code>{owner_id}</code>\n"
             f"Value: {price:,} Koin\n"
             f"Date: {issue_date}\n\n"
@@ -1425,7 +1455,7 @@ async def cmd_cheat_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await db.commit()
 
         await update.message.reply_text(
-            f"🧪 <b>ADMIN CHEAT:</b> Memunculkan <b>[{code}] {item['name']}</b> untuk User ID <code>{target_id}</code>!\nID Cert: <code>{cert_num}</code>",
+            f"🧪 <b>ADMIN CHEAT:</b> Memunculkan <b>{item['name']}</b> untuk User ID <code>{target_id}</code>!\nID Cert: <code>{cert_num}</code>",
             parse_mode="HTML"
         )
 
@@ -1530,7 +1560,7 @@ def build_app():
     app.add_error_handler(global_error_handler)
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(menu_callback_handler, pattern="^(vmenu_|vcat_|vact_|vbuy_|vchoosecareer_)"))
+    app.add_handler(CallbackQueryHandler(menu_callback_handler, pattern="^(vmenu_|vcat_|vact_|vconfirm_|vbuy_|vchoosecareer_)"))
 
     app.add_handler(CommandHandler("shop", cmd_shop))
     app.add_handler(CommandHandler("beli", cmd_beli))
