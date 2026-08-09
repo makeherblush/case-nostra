@@ -307,7 +307,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = (
         "✨ <b>ROYAL WEDDING ORGANIZER & EVENT SIMULATOR (RP)</b> ✨\n"
-        "──────────────────────────────────────────\n"
+        "──────────────────────────\n"
         "<i>\"Mewujudkan Impian Pernikahan Pasangan Pengantin Tanpa Batas\"</i>\n\n"
         "Selamat datang di Sistem Manajemen Event! "
         "Fasilitas ini terintegrasi penuh dengan channel <b>@RoyalWeddingRP</b>.\n"
@@ -852,7 +852,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         winner = random.choice(rows)[0]
         broadcast_msg = f"🎲 <b>LUCKY DRAW WINNER (@RoyalWeddingRP)</b>\n🏆 Selamat Kepada <b>@{winner}</b> memenangkan Doorprize Utama Pesta!"
         await send_to_channel(context, text=broadcast_msg)
-        await query.edit_message_text(f"🎲 <b>Pemenang Undian:</b> @{winner}!\nHasil telah disiarkan ke channel.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Kembali", callback_data="menu_admin")]), parse_mode="HTML"])
+        await query.edit_message_text(f"🎲 <b>Pemenang Undian:</b> @{winner}!\nHasil telah disiarkan ke channel.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Kembali", callback_data="menu_admin")]]), parse_mode="HTML")
 
     elif data == "adm_reset_event":
         async with get_db_connection() as db:
