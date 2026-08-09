@@ -351,8 +351,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await get_or_create_user(db, user_id, current_username)
 
     text = (
-        "⚔️ <b>SELAMAT DATANG DI PUSAT OPERASIONAL COSA NOSTRA</b>\n"
-        "──────────────────────────────────────────\n"
+        "⚔️ <b>SELAMAT DATANG DI PUSAT OPERASIONAL COSA NOSTRA</b>\n\n"
         "<i>\"Loyalty, Strategy, and Supreme Command in Every Operation.\"</i>\n\n"
         "Selamat datang di Portal Komando Utama Operasional Cosa Nostra Network. Bot ini didesain 100% ramah pemula, kamu bisa menjelajah seluruh sistem hanya dengan menekan tombol navigasi di bawah ini.\n\n"
         "💡 <b>PANDUAN MULAI UNTUK PEMULA:</b>\n"
@@ -378,8 +377,7 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
 
     elif data == "opmenu_profile":
         text = (
-            "👤 <b>PUSAT KELOLA PROFIL & STATUS ANGGOTA</b>\n"
-            "──────────────────────────────────────────\n"
+            "👤 <b>PUSAT KELOLA PROFIL & STATUS ANGGOTA</b>\n\n"
             "Menu ini membantumu memantau kondisi fisik, dompet, dan status hukum karaktermu secara lengkap.\n\n"
             "<b>Penjelasan Detail Sub-Fitur:</b>\n"
             "• <b>Cek Rekening & Profil:</b> Melihat data KTP-mu, sisa koin tunai, tabungan aman di bank, stamina, dan apakah kamu sedang bebas atau ditahan polisi.\n"
@@ -397,8 +395,7 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
 
     elif data == "opmenu_jobs":
         text = (
-            "🔨 <b>PUSAT PEKERJAAN & MISI INTRIK</b>\n"
-            "──────────────────────────────────────────\n"
+            "🔨 <b>PUSAT PEKERJAAN & MISI INTRIK</b>\n\n"
             "Di sinilah tempat utama kamu mencari koin tunai untuk memperkaya karaktermu.\n\n"
             "<b>Penjelasan Detail Sub-Fitur:</b>\n"
             "• <b>Bekerja Harian:</b> Bekerja rutin setiap 1 jam sekali. Setiap kali bekerja, staminamu berkurang 15%. Semakin tinggi pangkat mafiamu (G1-G7), gajimu akan makin besar.\n"
@@ -419,8 +416,7 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
     # ==========================================
     elif data == "opaction_job_menu":
         text = (
-            "💼 <b>PILIH MISI STRATEGIS JOB</b>\n"
-            "──────────────────────────────────────────\n"
+            "💼 <b>PILIH MISI STRATEGIS JOB</b>\n\n"
             "Pilih salah satu penugasan di bawah ini sesuai kualifikasi gelar mafiamu:\n\n"
             "<i>Klik tombol misi di bawah untuk langsung memulainya:</i>"
         )
@@ -525,8 +521,7 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
     # ==========================================
     elif data == "opaction_crime_menu":
         text = (
-            "🕵️ <b>PILIH AKSI KEJAHATAN TAKTIS</b>\n"
-            "──────────────────────────────────────────\n"
+            "🕵️ <b>PILIH AKSI KEJAHATAN TAKTIS</b>\n\n"
             "Pilih aksi kejahatan langsung di bawah ini (Hasil instan, namun berisiko masuk sel):\n\n"
         )
         keyboard = []
@@ -594,8 +589,7 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
 
     elif data == "opmenu_career":
         text = (
-            "💼 <b>PUSAT KARIR & PROFESI PUBLIK</b>\n"
-            "──────────────────────────────────────────\n"
+            "💼 <b>PUSAT KARIR & PROFESI PUBLIK</b>\n\n"
             "Jika kamu tidak memegang gelar mafia aktif (Gelar G0), kamu bisa bekerja di jalur pemerintahan atau penegak hukum publik.\n\n"
             "<b>Penjelasan Detail 5 Jalur Profesi:</b>\n"
             "1. <b>Police (Kepolisian):</b> Bertugas ronda dan menangkap pemain kriminal ber-Heat tinggi di jalanan.\n"
@@ -619,8 +613,7 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
     # ==========================================
     elif data == "opaction_choose_career_menu":
         text = (
-            "📋 <b>PILIH JALUR KARIR RESMI</b>\n"
-            "──────────────────────────────────────────\n"
+            "📋 <b>PILIH JALUR KARIR RESMI</b>\n\n"
             "Silakan pilih salah satu jalur karir publik di bawah ini menggunakan tombol interaktif:\n\n"
             "• <b>Police</b> — Penegak Hukum & Pemburu Buronan\n"
             "• <b>Lawyer</b> — Pengacara & Penjamin Tahanan\n"
@@ -670,8 +663,7 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
 
     elif data == "opmenu_targets":
         text = (
-            "🎯 <b>PUSAT TARGET & KONTRAK BURONAN</b>\n"
-            "──────────────────────────────────────────\n"
+            "🎯 <b>PUSAT TARGET & KONTRAK BURONAN</b>\n\n"
             "Menu interaksi dan pertempuran antar sesama pemain di dalam server.\n\n"
             "<b>Penjelasan Detail Sub-Fitur:</b>\n"
             "• <b>Daftar Buronan:</b> Melihat papan peringkat 10 pemain yang memiliki nilai sayembara (Bounty) tertinggi di kota.\n"
@@ -687,8 +679,7 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
 
     elif data == "opmenu_crew":
         text = (
-            "🏴‍☠️ <b>PUSAT ORGANISASI CREW (KELOMPOK)</b>\n"
-            "──────────────────────────────────────────\n"
+            "🏴‍☠️ <b>PUSAT ORGANISASI CREW (KELOMPOK)</b>\n\n"
             "Sistem perkumpulan/Geng untuk bermain bersama teman-temanmu di Cosa Nostra.\n\n"
             "<b>Penjelasan Detail Sub-Fitur:</b>\n"
             "• <b>Info Crew:</b> Mengecek nama gengmu, nama ketua, total poin reputasi (Respect), dan saldo tabungan kas bersama.\n"
@@ -704,8 +695,7 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
 
     elif data == "opmenu_dictionary":
         text = (
-            "📖 <b>KAMUS ISTILAH PENTING COSA NOSTRA</b>\n"
-            "──────────────────────────────────────────\n"
+            "📖 <b>KAMUS ISTILAH PENTING COSA NOSTRA</b>\n\n"
             "Bingung dengan kata-kata di dalam game? Berikut penjelasannya:\n\n"
             "💵 <b>Cash / Koin Tunai:</b> Uang yang sedang kamu pegang di dompet. Uang ini bisa hilang atau dirampok jika kamu diserang pemain lain.\n"
             "🏦 <b>Tabungan Bank:</b> Uang yang kamu simpan aman di bank. Uang di bank tidak bisa dirampok oleh siapa pun.\n"
@@ -728,8 +718,7 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
                 )
 
             text = (
-                f"🛠️ <b>OPERATIONS ADMIN PANEL & MODERASI</b>\n"
-                f"──────────────────────────────────────────\n"
+                f"🛠️ <b>OPERATIONS ADMIN PANEL & MODERASI</b>\n\n"
                 f"Level Otoritas Anda: <b>Tier {tier}</b>\n\n"
                 f"Menu khusus pengurus untuk mengaudit player, memenjarakan pelanggar aturan, serta menguji coba fitur via sistem cheat operasional."
             )
@@ -820,8 +809,7 @@ async def cmd_rekening(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Nama: <b>@{db_username}</b> (<code>{user_id}</code>)\n"
             f"Gelar Pangkat: <b>{gelar}</b>\n"
             f"Profesi Publik: <b>{career_track.upper()}</b> — {career_title}\n"
-            f"Crew: <b>{crew_name}</b>\n"
-            f"───────────────────\n"
+            f"Crew: <b>{crew_name}</b>\n\n"
             f"💵 Cash Tunai: <b>{koin:,} Koin</b>\n"
             f"🏦 Tabungan Bank: <b>{bank_balance:,} Koin</b>\n"
             f"⚡ Vitality: <b>{vitality}%</b>\n"
@@ -901,11 +889,9 @@ async def cmd_career(update: Update, context: ContextTypes.DEFAULT_TYPE):
             stat_info = f"\n📊 Record Operasional : <b>{val} {label}</b>"
 
         text = (
-            f"💼 <b>PROFIL KARIR & OTORITAS PUBLIK</b>\n"
-            f"──────────────────────────────\n"
+            f"💼 <b>PROFIL KARIR & OTORITAS PUBLIK</b>\n\n"
             f"Jalur Karir  : <b>{track.upper()}</b>\n"
-            f"Pangkat/Rank : <b>{title}</b> (Rank {rank}){stat_info}\n"
-            f"──────────────────────────────\n"
+            f"Pangkat/Rank : <b>{title}</b> (Rank {rank}){stat_info}\n\n"
             f"<i>Gunakan menu interaktif karir untuk beralih profesi secara praktis (Khusus non-mafia G0).</i>"
         )
         await update.message.reply_text(text, parse_mode="HTML")
@@ -949,11 +935,9 @@ async def cmd_badge(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
 
         text = (
-            f"🎖️ <b>LENCANA INSIGNIA & PROGRES PANGKAT</b>\n"
-            f"──────────────────────────────\n"
+            f"🎖️ <b>LENCANA INSIGNIA & PROGRES PANGKAT</b>\n\n"
             f"Profesi      : <b>{track.upper()}</b>\n"
-            f"Lencana Aktif: <b>{title}</b> (Rank {rank})\n"
-            f"──────────────────────────────\n"
+            f"Lencana Aktif: <b>{title}</b> (Rank {rank})\n\n"
             f"{progress_str}"
         )
         await update.message.reply_text(text, parse_mode="HTML")
@@ -1196,13 +1180,11 @@ async def cmd_expose(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         text = (
             f"📰 <b>BERITA UTAMA — INVESTIGASI MEDIA EXPOSE!</b>\n\n"
-            f"Subjek Investigasi: <b>@{t_name}</b> (<code>{target_id}</code>)\n"
-            f"──────────────────────────────\n"
+            f"Subjek Investigasi: <b>@{t_name}</b> (<code>{target_id}</code>)\n\n"
             f"💵 Likuiditas Cash: <b>{t_koin:,} Koin</b>\n"
             f"🏦 Deposito Bank : <b>{t_bank:,} Koin</b>\n"
             f"🔥 Level Heat   : <b>{t_heat}</b>\n"
-            f"🎯 Status Bounty : <b>{t_bounty:,} Koin</b>\n"
-            f"──────────────────────────────\n"
+            f"🎯 Status Bounty : <b>{t_bounty:,} Koin</b>\n\n"
             f"🖋️ Royalty Artikel: <b>+{royalty:,} Koin</b>\n"
             f"📊 Total Laporan  : {new_expose} Laporan Terbit{promo_msg}"
         )
@@ -1327,8 +1309,7 @@ async def cmd_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await get_or_create_user(db, user_id, current_username)
 
     text = (
-        "💼 <b>PILIH MISI STRATEGIS JOB</b>\n"
-        "──────────────────────────────────────────\n"
+        "💼 <b>PILIH MISI STRATEGIS JOB</b>\n\n"
         "Gunakan tombol di bawah untuk memilih & menjalankan misi tanpa perlu mengetik kode:"
     )
     keyboard = []
@@ -1346,8 +1327,7 @@ async def cmd_crime(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await get_or_create_user(db, user_id, current_username)
 
     text = (
-        "🕵️ <b>PILIH AKSI KEJAHATAN TAKTIS</b>\n"
-        "──────────────────────────────────────────\n"
+        "🕵️ <b>PILIH AKSI KEJAHATAN TAKTIS</b>\n\n"
         "Gunakan tombol di bawah untuk mengeksekusi aksi kejahatan langsung:"
     )
     keyboard = []
@@ -1583,8 +1563,7 @@ async def cmd_cek_rekening_ops(update: Update, context: ContextTypes.DEFAULT_TYP
             f"🔍 <b>OPERATIONS INSPECTION PANEL</b>\n\n"
             f"Target ID: <code>{target_id}</code> (@{target[1]})\n"
             f"Gelar Pangkat: <b>{target[6]}</b>\n"
-            f"Status Hukum: <b>{jail_status}</b>\n"
-            f"───────────────────\n"
+            f"Status Hukum: <b>{jail_status}</b>\n\n"
             f"💵 Cash Tunai: <b>{target[2]:,} Koin</b>\n"
             f"🏦 Saldo Bank: <b>{target[3]:,} Koin</b>\n"
             f"⚡ Vitality: <b>{target[5]}%</b>\n"
