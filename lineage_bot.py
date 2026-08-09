@@ -504,8 +504,8 @@ async def reg_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         "📝 <b>PENDAFTARAN REGISTRY KTP CITIZEN COSA NOSTRA</b>\n\n"
-        "Mari lengkapi berkas sipil Anda untuk arsip kota secara bertahap.\n"
-        "<b>1. Silakan masukkan NAMA LENGKAP karakter Anda:</b>\n"
+        "Mari lengkapi berkas sipil Anda untuk arsip kota.\n"
+        "<b>1. Masukkan NAMA LENGKAP karakter Anda:</b>\n"
         "<i>(Contoh: Don Vitorio Scaletta)</i>",
         parse_mode="HTML"
     )
@@ -515,7 +515,7 @@ async def reg_nama(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['nama_lengkap'] = update.message.text.strip()
     await update.message.reply_text(
         "🎭 <b>2. NAMA MUSE / AVATAR:</b>\n\n"
-        "Masukkan nama Muse / Face Claim (FC) yang Anda gunakan:\n"
+        "Masukkan nama Muse / Face Claim (FC) yang digunakan:\n"
         "<i>(Contoh: Character Alpha / Original Concept)</i>",
         parse_mode="HTML"
     )
@@ -547,13 +547,37 @@ async def reg_umur(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return REG_TGLLAHIR
 
 async def reg_tgl_lahir(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    username = update.effective_user.username or update.effective_user.first_name
+    context.user_data['tanggal_lahir'] = update.message.text.strip()
+    
+    nama = context.user_data.get('nama_lengkap', 'Warga Anonim')
+    muse = context.user_data.get('muse', 'Tidak Ada')
+    umur = context.user_data.get('umur', 18)
+    tgl = context.user_data.get('tanggal_lahir', '01-01-2000')
+
+    preview_msg = (
+        "📋 <b>KONFIRMASI DATA PENDAFTARAN KTP</b>\n\n"
+        f"👤 <b>Nama Lengkap :</b> {nama}\n"
+        f"🎭 <b>Muse / Avatar :</b> {muse}\n"
+        f"🎂 <b>Usia         :</b> {umur} Tahun\n"
+        f"📅 <b>Tgl Lahir    :</b> {tgl}\n\n"
+        "👇 <i>Silakan klik tombol <b>'Selesai'</b> di bawah ini untuk mengonfirmasi dan menerbitkan KTP Citizen Anda secara resmi.</i>"
+    )
+    
+    keyboard = [[InlineKeyboardButton("✅ Selesai & Terbitkan KTP", callback_data="reg_finish_done")]]
+    await update.message.reply_text(preview_msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+    return REG_TGLLAHIR
+
+async def reg_finish_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    username = query.from_user.username or query.from_user.first_name
 
     nama = context.user_data.get('nama_lengkap', 'Warga Anonim')
     muse = context.user_data.get('muse', 'Tidak Ada')
     umur = context.user_data.get('umur', 18)
-    tgl = update.message.text.strip()
+    tgl = context.user_data.get('tanggal_lahir', '01-01-2000')
     status_sipil = "Lajang"
 
     async with get_db_connection() as db:
@@ -589,7 +613,7 @@ async def reg_tgl_lahir(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "⚠️ <b>Perhatian:</b> Perubahan data identitas dikontrol ketat oleh Dewan Administrator.</i>"
     )
 
-    await update.message.reply_text(ktp_card, parse_mode="HTML")
+    await query.edit_message_text(ktp_card, parse_mode="HTML")
     return ConversationHandler.END
 
 async def reg_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2768,7 +2792,10 @@ def build_app():
             REG_NAMA: [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_nama)],
             REG_MUSE: [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_muse)],
             REG_UMUR: [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_umur)],
-            REG_TGLLAHIR: [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_tgl_lahir)]
+            REG_TGLLAHIR: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, reg_tgl_lahir),
+                CallbackQueryHandler(reg_finish_callback, pattern="^reg_finish_done$")
+            ]
         },
         fallbacks=[CommandHandler("cancel", reg_cancel)]
     )
