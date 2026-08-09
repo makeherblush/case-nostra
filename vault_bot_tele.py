@@ -455,6 +455,79 @@ def get_back_button():
 def get_back_to_shop_button():
     return InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Kembali ke Katalog Shop", callback_data="vmenu_shop")]])
 
+async def process_buy_item(user_id: int, username: str, code: str) -> str:
+    if code not in CATALOG:
+        return "❌ Kode item tidak ditemukan!"
+
+    item = CATALOG[code]
+    price = item["price"]
+
+    async with get_db_connection() as db:
+        user = await get_or_create_user(db, user_id, username)
+        user_koin = user[2]
+        user_vitality = user[5]
+        current_gelar = user[6]
+
+        if item["type"] == "gelar":
+            async with db.execute(
+                "SELECT id FROM inventory WHERE user_id = ? AND item_code = ?", 
+                (user_id, code)
+            ) as cursor:
+                already_owned = await cursor.fetchone()
+
+            if already_owned:
+                return f"❌ <b>PEMBELIAN DITOLAK:</b> Anda sudah pernah membeli gelar <b>{item['name']} ({code})</b>."
+
+            current_tier_num = int(current_gelar.replace("G", "")) if current_gelar and current_gelar.startswith("G") else 0
+            target_tier_num = int(code.replace("G", ""))
+
+            if target_tier_num <= current_tier_num:
+                return f"❌ <b>PEMBELIAN DITOLAK:</b> Gelar Anda saat ini (<b>{current_gelar}</b>) sudah setara atau lebih tinggi dari <b>{code}</b>."
+
+        if user_koin < price:
+            return f"❌ Saldo Koin Anda tidak cukup! Harga: {price:,} Koin (Saldo: {user_koin:,} Koin)"
+
+        new_koin = user_koin - price
+
+        if item["type"] in ["food", "drink"]:
+            vit_gain = item.get("vit", 0)
+            new_vit = min(100, user_vitality + vit_gain)
+            await db.execute("UPDATE users SET koin = ?, vitality = ? WHERE user_id = ?", (new_koin, new_vit, user_id))
+            await db.commit()
+            return (
+                f"🍽️ <b>KONSUMSI BERHASIL</b>\n\n"
+                f"Item: <b>[{code}] {item['name']}</b>\n"
+                f"Harga: {price:,} Koin\n"
+                f"Vitality Bertambah: +{vit_gain}% (Sisa Vitality: <b>{new_vit}%</b>)\n"
+                f"Sisa Saldo: {new_koin:,} Koin"
+            )
+
+        await db.execute("UPDATE users SET koin = ? WHERE user_id = ?", (new_koin, user_id))
+
+        if item["type"] == "gelar":
+            await db.execute("UPDATE users SET gelar_tier = ? WHERE user_id = ?", (code, user_id))
+
+        cert_num, sha256_hash, issue_date = generate_certificate(user_id, code, item["name"], price)
+        epoch_now = int(time.time())
+
+        await db.execute(
+            "INSERT INTO inventory (user_id, item_code, item_type, cert_number, acquired_at) VALUES (?, ?, ?, ?, ?)",
+            (user_id, code, item["type"], cert_num, epoch_now)
+        )
+        await db.execute(
+            "INSERT INTO certificates VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (cert_num, user_id, code, item["name"], price, issue_date, sha256_hash)
+        )
+        await db.commit()
+
+    return (
+        f"✅ <b>TRANSAKSI BERHASIL</b>\n\n"
+        f"Item: <b>[{code}] {item['name']}</b>\n"
+        f"Harga: {price:,} Koin\n"
+        f"Sisa Saldo: {new_koin:,} Koin\n"
+        f"Certificate ID: <code>{cert_num}</code>"
+    )
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     username = update.effective_user.username or update.effective_user.first_name
@@ -465,11 +538,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         "🏛️ <b>SELAMAT DATANG DI PUSAT VAULT & PERBANKAN COSA NOSTRA</b>\n\n"
         "<i>\"Honor, Loyalty, and Excellence in Every Transaction.\"</i>\n\n"
-        "Selamat datang di Portal Administrasi Finansial & Vault Utama. Bot ini didesain 100% ramah pemula, kamu bisa menjelajah seluruh layanan keuangan dan toko hanya dengan menekan tombol navigasi di bawah ini.\n\n"
+        "Selamat datang di Portal Administrasi Finansial & Vault Utama. Bot ini didesain 100% interaktif, kamu bisa membeli barang, mengelola rekening, dan memantau bisnis pasif hanya dengan mengeklik tombol.\n\n"
         "💡 <b>PANDUAN MULAI UNTUK PEMULA:</b>\n"
-        "1. Klik <b>🏦 Bank & Rekening</b> untuk menyimpan uangmu dengan aman agar tidak dirampok.\n"
-        "2. Klik <b>🛍️ Katalog Shop</b> untuk membeli makanan pemulih stamina, senjata, kendaraan, hingga properti mewah.\n"
-        "3. Klik <b>💼 Bisnis Pasif</b> untuk mengklaim keuntungan harian dari aset bisnis yang kamu miliki.\n\n"
+        "1. Klik <b>🏦 Bank & Rekening</b> untuk menyimpan uangmu dengan aman dari perampokan.\n"
+        "2. Klik <b>🛍️ Katalog Shop</b> untuk langsung membeli makanan, senjata, properti, hingga gelar mafia via tombol.\n"
+        "3. Klik <b>💼 Bisnis Pasif</b> untuk mengklaim keuntungan harian dari aset milikmu.\n\n"
         "Silakan pilih kategori layanan yang kamu butuhkan:"
     )
     if update.callback_query:
@@ -490,12 +563,10 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
     elif data == "vmenu_shop":
         text = (
             "🛍️ <b>PUSAT COSA NOSTRA SHOP & KATALOG BARANG</b>\n\n"
-            "Tempat membeli berbagai perlengkapan, aset, makanan pemulih stamina, hingga gelar mafia.\n\n"
+            "Tempat membeli perlengkapan, makanan pemulih stamina, properti penghasil koin pasif, hingga gelar mafia.\n\n"
             "<b>Cara Membeli Barang:</b>\n"
-            "1. Pilih kategori barang dari tombol di bawah ini.\n"
-            "2. Catat <b>Kode Item</b> (contoh: <code>F1</code>, <code>W1</code>, <code>H1</code>).\n"
-            "3. Ketik perintah <code>/beli [kode_item]</code> untuk membeli (contoh: <code>/beli F1</code>).\n\n"
-            "<i>Silakan pilih kategori barang yang ingin kamu lihat:</i>"
+            "Klik salah satu kategori di bawah ini, lalu pilih barang yang ingin kamu beli langsung dengan mengeklik tombolnya.\n\n"
+            "<i>Silakan pilih kategori barang:</i>"
         )
         await query.edit_message_text(text, reply_markup=get_shop_category_keyboard(), parse_mode="HTML")
 
@@ -503,18 +574,35 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
         category = data.replace("vcat_", "")
         if category in CATEGORIES_MAP:
             codes = CATEGORIES_MAP[category]
-            text = f"🛍️ <b>KATALOG BARANG: {category.upper()}</b>\n\n"
+            text = f"🛍️ <b>KATALOG BARANG: {category.upper()}</b>\n\nKlik tombol barang di bawah ini untuk langsung membelinya:\n\n"
+            keyboard = []
             for code in codes:
                 item = CATALOG[code]
                 extra_info = ""
                 if item["type"] in ["food", "drink"]:
-                    extra_info = f" | +{item.get('vit', 0)}% Stamina"
+                    extra_info = f" (+{item.get('vit', 0)}% Vit)"
                 elif "passive" in item:
-                    extra_info = f" | Hasil: +{item['passive']:,} Koin/hari"
+                    extra_info = f" (+{item['passive']:,}/hari)"
 
                 text += f"• <b>[{code}] {item['name']}</b> — {item['price']:,} Koin{extra_info}\n  <i>{item['desc']}</i>\n\n"
-            text += "👉 <b>Cara Beli:</b> Ketik <code>/beli [kode]</code> (Contoh: <code>/beli " + codes[0] + "</code>)"
-            await query.edit_message_text(text, reply_markup=get_back_to_shop_button(), parse_mode="HTML")
+                
+                btn_label = f"🛒 Beli [{code}] {item['name']} ({item['price']:,} Koin)"
+                keyboard.append([InlineKeyboardButton(btn_label, callback_data=f"vbuy_{code}")])
+
+            keyboard.append([InlineKeyboardButton("◀️ Kembali ke Katalog Shop", callback_data="vmenu_shop")])
+            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+
+    elif data.startswith("vbuy_"):
+        code = data.replace("vbuy_", "")
+        user_id = update.effective_user.id
+        username = update.effective_user.username or update.effective_user.first_name or "TanpaUsername"
+        
+        result_text = await process_buy_item(user_id, username, code)
+        await query.edit_message_text(
+            result_text,
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Kembali ke Katalog Shop", callback_data="vmenu_shop")]]),
+            parse_mode="HTML"
+        )
 
     elif data == "vmenu_bank":
         text = (
@@ -556,7 +644,7 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
     elif data == "vmenu_portfolio":
         text = (
             "🎒 <b>PUSAT PORTOFOLIO & KEPEMILIKAN ASET</b>\n\n"
-            "Tempat melihat daftar koleksi kekayaan dan mengecek keaslian sertifikat barang milikmu.\n\n"
+            "Tempat melihat daftar kekayaan dan mengecek keaslian sertifikat barang milikmu.\n\n"
             "<b>Penjelasan Detail Sub-Fitur:</b>\n"
             "• <b>Daftar Aset Saya:</b> Menampilkan total kekayaan bersihmu beserta seluruh daftar barang/aset yang pernah kamu beli dari Shop.\n"
             "• <b>Cek Sertifikat:</b> Memeriksa keaslian bukti kepemilikan digital aset mahal seperti rumah, mobil, dan senjata mewah.\n\n"
@@ -573,18 +661,68 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
             "💼 <b>PUSAT PROFESI & KARIR PUBLIK</b>\n\n"
             "Fitur ini khusus untuk pemain non-mafia yang bekerja sebagai pejabat publik atau jurnalis.\n\n"
             "<b>Penjelasan Detail Sub-Fitur:</b>\n"
-            "• <b>Cek Status Karir:</b> Melihat profesi publik aktifmu dan memilih pendaftaran jalur kerja resmi.\n"
-            "• <b>Lencana Pangkat:</b> Melihat progres kenaikan jabatan profesimu.\n"
-            "• <b>Rilis Berita Audit (/expose [user_id]):</b> Khusus profesi Jurnalis untuk membongkar dan mempublikasikan rahasia kekayaan pemain lain ke publik.\n"
-            "• <b>Terbitkan Amnesti (/amnesty [user_id]):</b> Khusus Politisi untuk menerbitkan diskon pemotongan Heat/Bounty pemain buronan.\n\n"
-            "<i>Tekan tombol di bawah untuk memilih aksi:</i>"
+            "• <b>Cek Status Karir:</b> Melihat profesi publik aktifmu.\n"
+            "• <b>Ganti Jalur Karir:</b> Memilih pendaftaran jalur kerja resmi secara interaktif via tombol.\n"
+            "• <b>Lencana Pangkat:</b> Melihat progres kenaikan jabatan profesimu.\n\n"
+            "<i>Tekan tombol di bawah untuk memilih aksi karir:</i>"
         )
         keyboard = [
             [InlineKeyboardButton("📋 Cek Status Karir Saya", callback_data="vact_career_view")],
+            [InlineKeyboardButton("📑 Pilih / Ganti Jalur Karir", callback_data="vact_career_choose_menu")],
             [InlineKeyboardButton("🎖️ Cek Lencana Pangkat", callback_data="vact_badge_view")],
             [InlineKeyboardButton("◀️ Kembali ke Menu Utama", callback_data="vmenu_main")]
         ]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+
+    elif data == "vact_career_choose_menu":
+        text = (
+            "📋 <b>PILIH JALUR KARIR RESMI</b>\n\n"
+            "Silakan pilih salah satu jalur karir publik di bawah ini menggunakan tombol interaktif:\n\n"
+            "• <b>Police</b> — Penegak Hukum & Pemburu Buronan\n"
+            "• <b>Lawyer</b> — Pengacara & Penjamin Tahanan\n"
+            "• <b>Judge</b> — Hakim Agung Pemutus Vonis\n"
+            "• <b>Politician</b> — Pejabat Publik & Kebijakan\n"
+            "• <b>Journalist</b> — Jurnalis Investigasi & Audit\n\n"
+            "<i>Catatan: Khusus pemain non-mafia (Gelar G0).</i>"
+        )
+        keyboard = [
+            [InlineKeyboardButton("👮 Police", callback_data="vchoosecareer_police"), InlineKeyboardButton("⚖️ Lawyer", callback_data="vchoosecareer_lawyer")],
+            [InlineKeyboardButton("⚖️ Judge", callback_data="vchoosecareer_judge"), InlineKeyboardButton("🏛️ Politician", callback_data="vchoosecareer_politician")],
+            [InlineKeyboardButton("📰 Journalist", callback_data="vchoosecareer_journalist")],
+            [InlineKeyboardButton("◀️ Kembali ke Menu Karir", callback_data="vmenu_career")]
+        ]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+
+    elif data.startswith("vchoosecareer_"):
+        selected = data.replace("vchoosecareer_", "")
+        user_id = update.effective_user.id
+        current_username = update.effective_user.username or update.effective_user.first_name or "TanpaUsername"
+        
+        async with get_db_connection() as db:
+            user = await get_or_create_user(db, user_id, current_username)
+            gelar_tier = user[6]
+
+            if gelar_tier != "G0":
+                return await query.edit_message_text(
+                    "🚫 <b>KONFLIK KEPENTINGAN DITOLAK!</b>\n\n"
+                    f"Anda sudah memegang gelar Sindikat Mafia (<b>{gelar_tier}</b>). "
+                    "Petinggi kartel tidak dapat merangkap jabatan sebagai Pejabat / Jurnalis Publik!",
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Kembali ke Menu Karir", callback_data="vmenu_career")]]),
+                    parse_mode="HTML"
+                )
+
+            await db.execute("UPDATE users SET career_track = ?, career_rank = 0 WHERE user_id = ?", (selected, user_id))
+            await db.commit()
+            
+            title = get_rank_title(selected, 0)
+            await query.edit_message_text(
+                f"📑 <b>PELANTIKAN KARIR PUBLIK BERHASIL!</b>\n\n"
+                f"Jalur Karir  : <b>{selected.upper()}</b>\n"
+                f"Pangkat Awal : <b>{title}</b> (Rank 0)\n\n"
+                f"Laksanakan tugas operasional Anda untuk menaikkan pangkat!",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Kembali ke Menu Karir", callback_data="vmenu_career")]]),
+                parse_mode="HTML"
+            )
 
     elif data == "vmenu_admin":
         user_id = update.effective_user.id
@@ -625,6 +763,7 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
     # ==========================================
     elif data == "vact_bank_bal":
         fake_update = Update(update.update_id, message=query.message)
+        fake_update._effective_user = update.effective_user
         context.args = ["balance"]
         await cmd_bank(fake_update, context)
     elif data == "vact_bank_dep_info":
@@ -655,21 +794,26 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
         )
     elif data == "vact_biz_status":
         fake_update = Update(update.update_id, message=query.message)
+        fake_update._effective_user = update.effective_user
         context.args = ["status"]
         await cmd_business(fake_update, context)
     elif data == "vact_biz_collect":
         fake_update = Update(update.update_id, message=query.message)
+        fake_update._effective_user = update.effective_user
         context.args = ["collect"]
         await cmd_business(fake_update, context)
     elif data == "vact_portfolio_view":
         fake_update = Update(update.update_id, message=query.message)
+        fake_update._effective_user = update.effective_user
         await cmd_portfolio(fake_update, context)
     elif data == "vact_career_view":
         fake_update = Update(update.update_id, message=query.message)
+        fake_update._effective_user = update.effective_user
         context.args = []
         await cmd_career(fake_update, context)
     elif data == "vact_badge_view":
         fake_update = Update(update.update_id, message=query.message)
+        fake_update._effective_user = update.effective_user
         await cmd_badge(fake_update, context)
 
 # ==========================================
@@ -746,7 +890,7 @@ async def cmd_career(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"💼 <b>PROFIL KARIR & OTORITAS PUBLIK</b>\n\n"
             f"Jalur Karir  : <b>{track.upper()}</b>\n"
             f"Pangkat/Rank : <b>{title}</b> (Rank {rank}){stat_info}\n\n"
-            f"<i>Gunakan '/career choose [track]' jika ingin beralih profesi (Khusus non-mafia G0).</i>"
+            f"<i>Gunakan menu interaktif karir untuk beralih profesi dengan mudah (Khusus non-mafia G0).</i>"
         )
         await update.message.reply_text(text, parse_mode="HTML")
 
@@ -894,116 +1038,32 @@ async def cmd_amnesty(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(text, parse_mode="HTML")
 
 async def cmd_shop(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    args = context.args
-    category = args[0].lower() if args else None
-
-    if category in CATEGORIES_MAP:
-        codes = CATEGORIES_MAP[category]
-        text = f"🛍️ <b>KATALOG SHOP ({category.upper()})</b>\n\n"
-        for code in codes:
-            item = CATALOG[code]
-            text += f"• <b>[{code}] {item['name']}</b> — {item['price']:,} Koin\n  <i>{item['desc']}</i>\n\n"
-        text += "Gunakan <code>/beli [kode]</code> untuk membeli."
-    else:
-        text = "🛍️ <b>COSA NOSTRA SHOP CATALOG</b>\n\nGunakan <code>/shop [kategori]</code> untuk memilih:\n\n"
-        for cat in CATEGORIES_MAP.keys():
-            text += f"• <code>/shop {cat}</code>\n"
-    
-    await update.message.reply_text(text, parse_mode="HTML")
+    text = (
+        "🛍️ <b>COSA NOSTRA SHOP CATALOG</b>\n\n"
+        "Gunakan tombol di bawah ini untuk membuka menu shop dan membeli barang pilihanmu:"
+    )
+    await update.message.reply_text(text, reply_markup=get_shop_category_keyboard(), parse_mode="HTML")
 
 async def cmd_beli(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    username = update.effective_user.username or update.effective_user.first_name or "TanpaUsername"
+
     if not context.args:
-        return await update.message.reply_text("❌ Masukkan kode item. Contoh: <code>/beli F1</code> atau <code>/beli H1</code>", parse_mode="HTML")
+        return await update.message.reply_text(
+            "🛍️ <b>COSA NOSTRA SHOP</b>\n\n"
+            "Gunakan tombol interaktif untuk membeli barang di Shop tanpa perlu mengetik kode!",
+            reply_markup=get_shop_category_keyboard(),
+            parse_mode="HTML"
+        )
     
     code = context.args[0].upper()
-    if code not in CATALOG:
-        return await update.message.reply_text("❌ Kode item tidak ditemukan!")
-
-    item = CATALOG[code]
-    price = item["price"]
-    user_id = update.effective_user.id
-    username = update.effective_user.username or update.effective_user.first_name
-
-    async with get_db_connection() as db:
-        user = await get_or_create_user(db, user_id, username)
-        user_koin = user[2]
-        user_vitality = user[5]
-        current_gelar = user[6]
-
-        if item["type"] == "gelar":
-            async with db.execute(
-                "SELECT id FROM inventory WHERE user_id = ? AND item_code = ?", 
-                (user_id, code)
-            ) as cursor:
-                already_owned = await cursor.fetchone()
-
-            if already_owned:
-                return await update.message.reply_text(
-                    f"❌ <b>PEMBELIAN DITOLAK:</b> Anda sudah pernah membeli gelar <b>{item['name']} ({code})</b>.",
-                    parse_mode="HTML"
-                )
-
-            current_tier_num = int(current_gelar.replace("G", "")) if current_gelar and current_gelar.startswith("G") else 0
-            target_tier_num = int(code.replace("G", ""))
-
-            if target_tier_num <= current_tier_num:
-                return await update.message.reply_text(
-                    f"❌ <b>PEMBELIAN DITOLAK:</b> Gelar Anda saat ini (<b>{current_gelar}</b>) sudah setara atau lebih tinggi dari <b>{code}</b>.",
-                    parse_mode="HTML"
-                )
-
-        if user_koin < price:
-            return await update.message.reply_text(
-                f"❌ Saldo tidak cukup! Harga: {price:,} Koin (Saldo: {user_koin:,} Koin)"
-            )
-
-        new_koin = user_koin - price
-
-        if item["type"] in ["food", "drink"]:
-            vit_gain = item.get("vit", 0)
-            new_vit = min(100, user_vitality + vit_gain)
-            await db.execute("UPDATE users SET koin = ?, vitality = ? WHERE user_id = ?", (new_koin, new_vit, user_id))
-            await db.commit()
-            return await update.message.reply_text(
-                f"🍽️ <b>KONSUMSI BERHASIL</b>\n\n"
-                f"Item: <b>[{code}] {item['name']}</b>\n"
-                f"Harga: {price:,} Koin\n"
-                f"Vitality Bertambah: +{vit_gain}% (Sisa Vitality: <b>{new_vit}%</b>)\n"
-                f"Sisa Saldo: {new_koin:,} Koin",
-                parse_mode="HTML"
-            )
-
-        await db.execute("UPDATE users SET koin = ? WHERE user_id = ?", (new_koin, user_id))
-
-        if item["type"] == "gelar":
-            await db.execute("UPDATE users SET gelar_tier = ? WHERE user_id = ?", (code, user_id))
-
-        cert_num, sha256_hash, issue_date = generate_certificate(user_id, code, item["name"], price)
-        epoch_now = int(time.time())
-
-        await db.execute(
-            "INSERT INTO inventory (user_id, item_code, item_type, cert_number, acquired_at) VALUES (?, ?, ?, ?, ?)",
-            (user_id, code, item["type"], cert_num, epoch_now)
-        )
-        await db.execute(
-            "INSERT INTO certificates VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (cert_num, user_id, code, item["name"], price, issue_date, sha256_hash)
-        )
-        await db.commit()
-
-    text = (
-        f"✅ <b>TRANSAKSI BERHASIL</b>\n\n"
-        f"Item: <b>[{code}] {item['name']}</b>\n"
-        f"Harga: {price:,} Koin\n"
-        f"Sisa Saldo: {new_koin:,} Koin\n"
-        f"Certificate ID: <code>{cert_num}</code>"
-    )
-    await update.message.reply_text(text, parse_mode="HTML")
+    result_text = await process_buy_item(user_id, username, code)
+    await update.message.reply_text(result_text, parse_mode="HTML")
 
 async def cmd_bank(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     user_id = update.effective_user.id
-    username = update.effective_user.username or update.effective_user.first_name
+    username = update.effective_user.username or update.effective_user.first_name or "TanpaUsername"
 
     async with get_db_connection() as db:
         user = await get_or_create_user(db, user_id, username)
@@ -1063,7 +1123,7 @@ async def cmd_bank(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_business(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     user_id = update.effective_user.id
-    username = update.effective_user.username or update.effective_user.first_name
+    username = update.effective_user.username or update.effective_user.first_name or "TanpaUsername"
     now_epoch = int(time.time())
 
     async with get_db_connection() as db:
@@ -1470,7 +1530,7 @@ def build_app():
     app.add_error_handler(global_error_handler)
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(menu_callback_handler, pattern="^(vmenu_|vcat_|vact_)"))
+    app.add_handler(CallbackQueryHandler(menu_callback_handler, pattern="^(vmenu_|vcat_|vact_|vbuy_|vchoosecareer_)"))
 
     app.add_handler(CommandHandler("shop", cmd_shop))
     app.add_handler(CommandHandler("beli", cmd_beli))
